@@ -13,12 +13,29 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
   - Por cada mensaje, el cliente crea una nueva conexión, envía el mensaje, espera el eco del servidor y, tras recibirlo, cierra la conexión.
   - Una vez enviados todos los mensajes, el cliente registra que terminó su ejecución.
 
-## Ej1
+## Ejercicio 1: Generación dinámica de Docker Compose
 
-- **Generación dinámica de Docker Compose:**
-  - Implementé un script bash (`generar-compose.sh`) junto a un generador en Python (`mi-generador.py`) para crear el archivo `docker-compose-dev.yaml` de forma dinámica.
+- **Objetivo:**
+  - Permitir la generación dinámica del archivo `docker-compose-dev.yaml` con la cantidad de clientes deseada, sin necesidad de modificar manualmente el archivo.
+
+- **Implementación:**
+  - Desarrollé un script bash (`generar-compose.sh`) junto a un generador en Python (`mi-generador.py`) para crear el archivo de forma automática.
   - El script genera los servicios necesarios: un servicio para el servidor y un servicio para cada cliente (nombrados `client1`, `client2`, etc.) según el parámetro indicado.
-  - Para poder generar dinamicamente el archvio lo que hice fue crear un for que recorra la cantidad de clientes que se quieren generar y en cada iteración se agrega un servicio al archivo yaml aumentando el numero de id del cliente.
+  - Utilicé un bucle `for` en el generador para recorrer la cantidad de clientes a crear, añadiendo en cada iteración un servicio en el archivo YAML e incrementando el identificador del cliente.
+
+
+## Ejercicio 2: Configuración Externa sin Rebuild
+
+- **Objetivo:**
+  - Permitir que los cambios en los archivos de configuración (`config.yaml` para el cliente y `config.ini` para el servidor) se apliquen sin necesidad de reconstruir las imágenes Docker.
+
+- **Implementación:**
+  - Puse los archivos de configuración en los contenedores usando volúmenes en el docker-compose-dev.yaml.
+  - Aseguré que tanto el cliente como el servidor lean sus configuraciones desde los archivos montados (no desde la imagen).
+
+- **Problema y solución:**
+  - Inicialmente definí en el docker-compose la variable CLI_LOG_LEVEL=DEBUG para el cliente, lo que provocaba que el valor se fijara en "DEBUG" sin importar lo que pusiera en config.yaml.
+  - Para solucionar esto, eliminé la línea de la variable de entorno, permitiendo que el cliente tome el valor de log_level directamente desde el archivo de configuración montado.
 
 ## Cómo ejecutar el proyecto
 
