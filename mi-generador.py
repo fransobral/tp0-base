@@ -42,6 +42,7 @@ def main():
         lines.append("    depends_on:")
         lines.append("      - server")
         lines.append("")
+        
     lines.append("networks:")
     lines.append("  testing_net:")
     lines.append("    ipam:")
