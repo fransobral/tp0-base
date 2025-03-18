@@ -37,6 +37,26 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
   - Inicialmente definí en el docker-compose la variable CLI_LOG_LEVEL=DEBUG para el cliente, lo que provocaba que el valor se fijara en "DEBUG" sin importar lo que pusiera en config.yaml.
   - Para solucionar esto, eliminé la línea de la variable de entorno, permitiendo que el cliente tome el valor de log_level directamente desde el archivo de configuración montado.
 
+## Ejercicio 3: Validación del Echo Server
+
+- **Objetivo:**
+  - Verificar el correcto funcionamiento del echo server sin exponer puertos en el host, utilizando netcat en un contenedor.
+
+- **Implementación:**
+  - Creé un script bash llamado `validar-echo-server.sh` ubicado en la raíz del proyecto.
+  - El script lanza un contenedor basado en la imagen `busybox` (que incluye netcat) y lo une a la red interna de Docker (`tp0_testing_net`).
+  - Dentro del contenedor, se usa netcat para enviar un mensaje de prueba ("Hello Echo") al servidor en el puerto 12345 y se captura la respuesta.
+  - Se compara el mensaje enviado con la respuesta recibida:
+    - Si son idénticos, se imprime:  
+      `action: test_echo_server | result: success`
+    - Si no coinciden, se imprime:  
+      `action: test_echo_server | result: fail`
+
+- **Notas:**
+  - Se utiliza busybox para evitar instalar netcat en el host.
+  - La comunicación se realiza a través de la red interna de Docker, lo que permite validar el servicio sin exponer puertos al exterior.
+
+
 ## Cómo ejecutar el proyecto
 
 ### 1. Generar el archivo Docker Compose
