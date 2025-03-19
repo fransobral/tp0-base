@@ -53,7 +53,7 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
       `action: test_echo_server | result: fail`
 
 - **Notas:**
-  - Se utiliza busybox para evitar instalar netcat en el host.
+  - Utilizo busybox para evitar instalar netcat en el host.
   - La comunicación se realiza a través de la red interna de Docker, lo que permite validar el servicio sin exponer puertos al exterior.
 
 
