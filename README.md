@@ -56,6 +56,19 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
   - Utilizo busybox para evitar instalar netcat en el host.
   - La comunicación se realiza a través de la red interna de Docker, lo que permite validar el servicio sin exponer puertos al exterior.
 
+## Ejercicio 4: Terminación Graceful con SIGTERM
+
+- **Objetivo:**
+  - Lograr que tanto el servidor como el cliente terminen de forma graceful al recibir la señal SIGTERM.
+  - Asegurar que todos los recursos (sockets, archivos, threads, procesos) se cierren correctamente antes de que finalice la aplicación.
+  - Registrar mensajes en el cierre de cada recurso para evidenciar que el shutdown se realizó de manera ordenada.
+
+- **Implementación:**
+  - En el servidor, modifiqué la clase para incluir una bandera interna `_running` y un método `shutdown()` que cierra el socket del servidor y detiene el loop principal.
+  - En `main.py`, registré un handler para SIGTERM que, al recibir la señal, llama al método `shutdown()` del servidor y finaliza el proceso graceful.
+  - En el cliente, incorporé un canal de señales para capturar SIGTERM en el bucle principal. Si se detecta la señal, el cliente registra el mensaje de salida y termina el bucle sin seguir enviando mensajes.
+  - Añadí logs en cada paso del cierre (cierre de conexión, cierre del socket, etc.) para poder verificar en los registros que todos los recursos se liberaron correctamente.
+
 
 ## Cómo ejecutar el proyecto
 
