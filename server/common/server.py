@@ -41,7 +41,7 @@ class Server:
             logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: "{msg}"')
 
             # Parse message: nombre|apellido|documento|nacimiento|numero
-            fields = msg.split('|')
+            fields = msg.split('~')
             if len(fields) != 5:
                 raise ValueError("Invalid bet format")
 

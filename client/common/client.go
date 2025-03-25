@@ -72,7 +72,7 @@ func (c *Client) createClientSocket() error {
 // serializeBet serializes a BetMessage into a string using '|' as a delimiter.
 // This is my custom protocol for communication.
 func serializeBet(b BetMessage) string {
-	return b.Nombre + "|" + b.Apellido + "|" + b.Documento + "|" + b.Nacimiento + "|" + b.Numero
+    return b.Nombre + "~" + b.Apellido + "~" + b.Documento + "~" + b.Nacimiento + "~" + b.Numero
 }
 
 // parseConfirmation parses a confirmation message string into a ConfirmationMessage struct.
