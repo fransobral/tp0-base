@@ -1,6 +1,6 @@
 import socket
 import logging
-
+from common.utils import Bet, store_bets
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -16,12 +16,9 @@ class Server:
         Dummy Server loop
 
         Server that accept a new connections and establishes a
-        communication with a client. After client with communucation
-        finishes, servers starts to accept new connections again
+        communication with a client. After client with communication
+        finishes, server starts to accept new connections again
         """
-
-        # TODO: Modify this program to handle signal to graceful shutdown
-        # the server
         while self._running:
             try:
                 client_sock = self.__accept_new_connection()
@@ -42,10 +39,29 @@ class Server:
             msg = client_sock.recv(1024).rstrip().decode('utf-8')
             addr = client_sock.getpeername()
             logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
-            # TODO: Modify the send to avoid short-writes
-            client_sock.send("{}\n".format(msg).encode('utf-8'))
-        except OSError as e:
-            logging.error("action: receive_message | result: fail | error: {e}")
+
+            # Parse message: nombre|apellido|documento|nacimiento|numero
+            fields = msg.split('|')
+            if len(fields) != 5:
+                raise ValueError("Invalid bet format")
+
+            nombre, apellido, documento, nacimiento, numero = fields
+            agency = addr[0].split('.')[-1]  # estimate agency from last octate IP (placeholder)
+
+            bet = Bet(agency, nombre, apellido, documento, nacimiento, numero)
+            store_bets([bet])
+
+            logging.info(f'action: apuesta_almacenada | result: success | dni: {documento} | numero: {numero}')
+
+            response = f"ok|{documento}|{numero}\n"
+            client_sock.sendall(response.encode('utf-8'))
+
+        except Exception as e:
+            logging.error(f"action: process_bet | result: fail | error: {str(e)}")
+            try:
+                client_sock.sendall(f"fail|||{str(e)}\n".encode('utf-8'))
+            except:
+                pass
         finally:
             client_sock.close()
             logging.info("action: close_connection | result: success | message: Client socket closed")

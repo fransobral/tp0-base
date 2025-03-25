@@ -69,6 +69,39 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
   - En el cliente, incorporé un canal de señales para capturar SIGTERM en el bucle principal. Si se detecta la señal, el cliente registra el mensaje de salida y termina el bucle sin seguir enviando mensajes.
   - Añadí logs en cada paso del cierre (cierre de conexión, cierre del socket, etc.) para poder verificar en los registros que todos los recursos se liberaron correctamente.
 
+## Ejercicio 5: Apuestas de la Lotería Nacional
+
+- **Objetivo:**
+  - Adaptar el cliente y el servidor para implementar un nuevo caso de uso: la recepción, procesamiento y registro de apuestas de distintas agencias de quiniela.
+  - Reemplazar la lógica del echo server por una funcionalidad de negocio real, manteniendo el manejo de SIGTERM y la arquitectura modular previa.
+
+- **Implementación:**
+  - Modifiqué el cliente para que lea los datos de la apuesta (nombre, apellido, documento, nacimiento, número) desde variables de entorno.
+  - Cada contenedor cliente representa una agencia distinta y envía su apuesta al servidor al arrancar.
+  - El cliente construye un mensaje con los campos separados por `|` (sin usar librerías de serialización), lo envía al servidor y espera una confirmación.
+  - El servidor recibe el mensaje, lo parsea, crea una instancia de `Bet` y lo almacena con `store_bets(...)`.
+  - Se loguea `action: apuesta_almacenada` en el servidor y `action: apuesta_enviada` en el cliente si todo sale bien.
+  - Se conserva el manejo de SIGTERM en cliente y servidor para que ambos finalicen de manera graceful al recibir esa señal.
+
+- **Comunicación:**
+  - Implementé un protocolo propio donde cada mensaje de apuesta se envía como texto plano con campos separados por el caracter `|` y termina en `\n`.
+  - No se utiliza ninguna librería externa de serialización como JSON, cumpliendo con los requerimientos de la cátedra.
+  - La separación de responsabilidades se mantiene: el cliente arma el mensaje desde datos de entorno, y el servidor lo desarma y lo convierte en un objeto de dominio (`Bet`).
+  - Para evitar short reads, los mensajes incluyen un delimitador (`\n`) que permite leer el mensaje completo en el servidor.
+  - Se manejan los errores de envío, recepción y parseo de manera explícita, con logs claros en ambos extremos.
+
+- **Protocolo de transporte:**
+  - El sistema utiliza **TCP** tanto en cliente como en servidor:
+    - `net.Dial("tcp", ...)` en el cliente.
+    - `socket.SOCK_STREAM` en el servidor.
+  - Esto garantiza entrega en orden y manejo automático de retransmisiones.
+
+- **Control de flujo:**
+  - Cada cliente implementa el esquema **"envío → espera confirmación → fin"**.
+  - Este mecanismo evita que se saturen los buffers de TCP si el servidor no puede procesar rápidamente.
+  - La conexión se cierra después de la confirmación, garantizando un envío seguro por vez.
+
+---
 
 ## Cómo ejecutar el proyecto
 
