@@ -104,11 +104,47 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
 - **Complicaciones y soluciones:**
 
   - **Problema 1:** Inicialmente utilizaba el delimitador `|` para separar los campos del mensaje. Sin embargo, al loguear el mensaje completo se rompía el parser de logs, ya que el contenido podía contener múltiples `|` y generar detalles vacíos o mal formateados (por ejemplo, obteniendo entradas como `"Sobr"` sin el separador esperado).
-  - **Solución:** Decidí cambiar el delimitador a `~`, un carácter poco común en datos normales. Actualicé la función de serialización en el cliente para concatenar los campos usando `~`, y en el servidor modifiqué el parseo para usar este mismo delimitador. Con esto evito conflictos en los logs y mantuve la integridad del mensaje enviado.
+    - **Solución:** Decidí cambiar el delimitador a `~`, un carácter poco común en datos normales. Actualicé la función de serialización en el cliente para concatenar los campos usando `~`, y en el servidor modifiqué el parseo para usar este mismo delimitador. Con esto evito conflictos en los logs y mantuve la integridad del mensaje enviado.
 
   - **Problema 2:** Al correr los tests, me arrojaba error ya que no estaban inicializadas las variables de entorno `NOMBRE`, `APELLIDO`, `DOCUMENTO`, `NACIMIENTO` y `NUMERO`.
-  - **Solución:** Agregué dichas variables a `mi-generador.py` para que se inicialicen con valores por defecto.
+    - **Solución:** Agregué dichas variables a `mi-generador.py` para que se inicialicen con valores por defecto.
 
+## Ejercicio 6: Batch Processing de Apuestas
+
+- **Objetivo:**
+  - Adaptar los clientes para que envíen varias apuestas en una sola consulta (batch o chunk), reduciendo el tiempo de transmisión y el overhead de conexión.
+  - La información de cada agencia se simula leyendo su archivo numérico correspondiente, siguiendo la convención de que el cliente N utilizará el archivo `.data/agency-{N}.csv`.
+  - En el servidor, si todas las apuestas del batch se procesan correctamente, se debe loguear  
+    `action: apuesta_recibida | result: success | cantidad: ${CANTIDAD_DE_APUESTAS}`; en caso contrario, se debe responder con un código de error y loguear  
+    `action: apuesta_recibida | result: fail | cantidad: ${CANTIDAD_DE_APUESTAS}`.
+  - La cantidad máxima de apuestas por batch es configurable mediante la clave `batch: maxAmount` en el archivo de configuración (`config.yaml`), y se ajustó para que los paquetes no excedan los 8kB.
+
+- **Implementación:**
+  - **Cliente:**  
+    - Modifiqué el cliente para que, en lugar de enviar una apuesta a la vez, lea el archivo de apuestas (por ejemplo, `/app/.data/agency-<CLI_ID>.csv`) que se inyecta en el contenedor mediante volúmenes.
+    - Se implementa una función que lee el archivo CSV y carga cada línea (cada apuesta) en un slice.
+    - Estas apuestas se agrupan en batches (chunks) cuyo tamaño máximo es el definido en `batch.maxAmount` de `config.yaml`.
+    - Por cada batch, se abre una conexión TCP, se envía el batch (cada apuesta separada por salto de línea) y se espera la respuesta del servidor.
+    - Se maneja SIGTERM para garantizar un cierre graceful.
+  
+  - **Servidor:**  
+    - El servidor recibe el batch de apuestas (un chunk de texto de hasta 8kB), lo separa en líneas y para cada línea valida que tenga 5 campos (por ejemplo: `first_name,last_name,document,birthdate,number`).
+    - Si todas las líneas son válidas, las procesa (creando objetos `Bet` y llamando a `store_bets(...)`) y loguea  
+      `action: apuesta_recibida | result: success | cantidad: ${cantidad}`; de lo contrario, responde con un error y loguea  
+      `action: apuesta_recibida | result: fail | cantidad: ${cantidad}`.
+    - El servidor responde con éxito solamente si **todas** las apuestas del batch fueron procesadas correctamente.
+
+- **Comunicación:**
+  - Utilizo TCP para la comunicación, manteniendo el protocolo de sockets.
+  - El batch se envía como un bloque de texto plano: cada apuesta se coloca en una línea (usando el delimitador de coma `,` para separar campos) y se termina el batch con un salto de línea `\n`.
+  - Esto permite que el servidor lea el mensaje completo (evitando fenómenos de "short read") y procese cada línea por separado.
+  - Implemento el manejo de errores tanto en el envío como en la recepción y parseo de los datos.
+
+- **Complicaciones y soluciones:**
+  - **Problema 1:** Inicialmente, tuve dificultades para manejar el montaje de los archivos de apuestas. Los clientes no encontraban sus archivos porque la carpeta `.data` no estaba correctamente montada en el contenedor.
+    - **Solución:** Modifiqué el `mi-generador.py` para incluir la carpeta `.data` como volumen en cada cliente y actualicé el código del cliente para leer desde la ruta `/app/.data/agency-{CLI_ID}.csv`.
+  - **Problema 2:** Tuve complicaciones al agrupar las apuestas en batches, asegurándome de que cada paquete no excediera 8kB.
+    - **Solución:** Implementé una función que divide el slice de apuestas en chunks del tamaño máximo configurado (definido en `batch.maxAmount`), lo que garantiza que cada mensaje enviado se mantenga por debajo del límite.
 
 ---
 
