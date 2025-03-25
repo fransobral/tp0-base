@@ -81,14 +81,14 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
   - El cliente construye un mensaje con los campos separados por `|` (sin usar librerías de serialización), lo envía al servidor y espera una confirmación.
   - El servidor recibe el mensaje, lo parsea, crea una instancia de `Bet` y lo almacena con `store_bets(...)`.
   - Se loguea `action: apuesta_almacenada` en el servidor y `action: apuesta_enviada` en el cliente si todo sale bien.
-  - Se conserva el manejo de SIGTERM en cliente y servidor para que ambos finalicen de manera graceful al recibir esa señal.
+  - Conservo el manejo de SIGTERM en cliente y servidor para que ambos finalicen de manera graceful al recibir esa señal.
 
 - **Comunicación:**
   - Implementé un protocolo propio donde cada mensaje de apuesta se envía como texto plano con campos separados por el caracter `|` y termina en `\n`.
-  - No se utiliza ninguna librería externa de serialización como JSON, cumpliendo con los requerimientos de la cátedra.
+  - No utilicé ninguna librería externa de serialización como JSON, cumpliendo con los requerimientos de la cátedra.
   - La separación de responsabilidades se mantiene: el cliente arma el mensaje desde datos de entorno, y el servidor lo desarma y lo convierte en un objeto de dominio (`Bet`).
   - Para evitar short reads, los mensajes incluyen un delimitador (`\n`) que permite leer el mensaje completo en el servidor.
-  - Se manejan los errores de envío, recepción y parseo de manera explícita, con logs claros en ambos extremos.
+  - Manejo los errores de envío, recepción y parseo de manera explícita, con logs claros en ambos extremos.
 
 - **Protocolo de transporte:**
   - El sistema utiliza **TCP** tanto en cliente como en servidor:
@@ -100,6 +100,15 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
   - Cada cliente implementa el esquema **"envío → espera confirmación → fin"**.
   - Este mecanismo evita que se saturen los buffers de TCP si el servidor no puede procesar rápidamente.
   - La conexión se cierra después de la confirmación, garantizando un envío seguro por vez.
+
+- **Complicaciones y soluciones:**
+
+  - **Problema 1:** Inicialmente utilizaba el delimitador `|` para separar los campos del mensaje. Sin embargo, al loguear el mensaje completo se rompía el parser de logs, ya que el contenido podía contener múltiples `|` y generar detalles vacíos o mal formateados (por ejemplo, obteniendo entradas como `"Sobr"` sin el separador esperado).
+  - **Solución:** Decidí cambiar el delimitador a `~`, un carácter poco común en datos normales. Actualicé la función de serialización en el cliente para concatenar los campos usando `~`, y en el servidor modifiqué el parseo para usar este mismo delimitador. Con esto evito conflictos en los logs y mantuve la integridad del mensaje enviado.
+
+  - **Problema 2:** Al correr los tests, me arrojaba error ya que no estaban inicializadas las variables de entorno `NOMBRE`, `APELLIDO`, `DOCUMENTO`, `NACIMIENTO` y `NUMERO`.
+  - **Solución:** Agregué dichas variables a `mi-generador.py` para que se inicialicen con valores por defecto.
+
 
 ---
 
