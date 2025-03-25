@@ -44,6 +44,7 @@ def main():
         lines.append(f"      - NUMERO={(i+3)*8}")
         lines.append("    volumes:")
         lines.append("      - ./client/config.yaml:/config.yaml:ro")
+        lines.append("      - ./.data:/app/.data:ro")
         lines.append("    networks:")
         lines.append("      - testing_net")
         lines.append("    depends_on:")

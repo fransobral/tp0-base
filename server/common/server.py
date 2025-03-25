@@ -13,55 +13,76 @@ class Server:
 
     def run(self):
         """
-        Dummy Server loop
-
-        Server that accept a new connections and establishes a
-        communication with a client. After client with communication
-        finishes, server starts to accept new connections again
+        Server loop:
+        - Accept a connection
+        - Handle the batch of bets
+        - If all bets are valid => success
+        - If at least one fails => fail
         """
         while self._running:
             try:
                 client_sock = self.__accept_new_connection()
             except OSError:
-                break  # Server was shutdown
+                break  # server was shutdown
             self.__handle_client_connection(client_sock)
         logging.info("action: server_shutdown | result: success | message: Server shutting down gracefully")
-    
+
     def __handle_client_connection(self, client_sock):
         """
-        Read message from a specific client socket and closes the socket
-
-        If a problem arises in the communication with the client, the
-        client socket will also be closed
+        Read a batch from client (multiple lines, ended by \n).
+        If all lines are valid => store them with store_bets(...) => log success => respond success|count
+        If any line is invalid => log fail => respond fail|0
         """
         try:
-            # TODO: Modify the receive to avoid short-reads
-            msg = client_sock.recv(1024).rstrip().decode('utf-8')
-            addr = client_sock.getpeername()
-            logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: "{msg}"')
+            # 1) Recibimos hasta 8KB y quitamos el \n final
+            data = client_sock.recv(8192).decode('utf-8').rstrip('\n')
+            if not data:
+                logging.error("action: receive_batch | result: fail | reason: empty_data")
+                client_sock.sendall("fail|0\n".encode('utf-8'))
+                return
 
-            # Parse message: nombre|apellido|documento|nacimiento|numero
-            fields = msg.split('~')
-            if len(fields) != 5:
-                raise ValueError("Invalid bet format")
+            # 2) Separamos el chunk por líneas
+            lines = data.split('\n')
 
-            nombre, apellido, documento, nacimiento, numero = fields
-            agency = addr[0].split('.')[-1]  # estimate agency from last octate IP (placeholder)
+            # 3) Parseamos cada línea y creamos la lista de Bet
+            bets_to_store = []
+            for line in lines:
+                fields = line.strip().split(',')
+                if len(fields) != 5:
+                    # Apuesta inválida => todo el batch falla
+                    logging.info(f"action: apuesta_recibida | result: fail | cantidad: 0")
+                    client_sock.sendall("fail|0\n".encode('utf-8'))
+                    return
 
-            bet = Bet(agency, nombre, apellido, documento, nacimiento, numero)
-            store_bets([bet])
+                # Asumimos: first_name, last_name, document, birthdate, number
+                first_name, last_name, document, birthdate, number_str = fields
 
-            logging.info(f'action: apuesta_almacenada | result: success | dni: {documento} | numero: {numero}')
+                # Por ejemplo, tomamos la "agency" desde la IP del cliente:
+                addr = client_sock.getpeername()  # (ip, port)
+                ip = addr[0]
+                agency = ip.split('.')[-1]  # truco: último octeto como ID de agencia
 
-            response = f"ok|{documento}|{numero}\n"
-            client_sock.sendall(response.encode('utf-8'))
+                try:
+                    bet = Bet(agency, first_name, last_name, document, birthdate, number_str)
+                except Exception as e:
+                    # Si la fecha o el número no parsean bien => batch fail
+                    logging.info(f"action: apuesta_recibida | result: fail | cantidad: 0 | error: {str(e)}")
+                    client_sock.sendall("fail|0\n".encode('utf-8'))
+                    return
+
+                bets_to_store.append(bet)
+
+            # 4) Si todas las apuestas se pudieron parsear, las guardamos
+            store_bets(bets_to_store)
+            total = len(bets_to_store)
+            logging.info(f"action: apuesta_recibida | result: success | cantidad: {total}")
+
+            # 5) Responder success|count
+            client_sock.sendall(f"success|{total}\n".encode('utf-8'))
 
         except Exception as e:
-            logging.error(f"action: process_bet | result: fail | error: {str(e)}")
-            try:
-                client_sock.sendall(f"fail|||{str(e)}\n".encode('utf-8'))
-            except:
-                pass
+            logging.error(f"action: process_batch | result: fail | error: {str(e)}")
+            client_sock.sendall("fail|0\n".encode('utf-8'))
         finally:
             client_sock.close()
             logging.info("action: close_connection | result: success | message: Client socket closed")
@@ -73,8 +94,6 @@ class Server:
         Function blocks until a connection to a client is made.
         Then connection created is printed and returned
         """
-
-        # Connection arrived
         logging.info('action: accept_connections | result: in_progress')
         c, addr = self._server_socket.accept()
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
