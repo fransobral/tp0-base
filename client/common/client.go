@@ -86,6 +86,8 @@ func (c *Client) StartClientBatch() {
         return
     }
 
+	time.Sleep(500 * time.Millisecond)
+	
     // 7) After everything, log "exit" so the tests can detect we ended properly
     log.Infof("action: exit | result: success | client_id: %s", c.config.ID)
 }
