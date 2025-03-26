@@ -141,6 +141,7 @@ class Server:
 
             # If all "seen" agencies have now notified, do the draw (only once)
             if not self._draw_done and (self._notified_agencies == self._seen_agencies):
+                logging.info(f"{self._notified_agencies} == {self._seen_agencies}, running draw {self._draw_done}")
                 all_bets = load_bets()
                 for bet in all_bets:
                     if has_won(bet):
