@@ -29,7 +29,6 @@ type ClientConfig struct {
 // Client handles reading bets from a CSV file and sending them in batches
 type Client struct {
     config ClientConfig
-    conn   net.Conn
 }
 
 // NewClient initializes a new client receiving the configuration as a parameter.
@@ -74,22 +73,27 @@ func (c *Client) StartClientBatch() {
             return
         }
     }
-    log.Infof("action: all_batches_sent | result: success | client_id: %v | total_bets: %v", c.config.ID, len(bets))
-	log.Infof("DEBAG: Starting NotifyFinished")
+    log.Infof("action: all_batches_sent | result: success | client_id: %v | total_bets: %v",
+        c.config.ID, len(bets))
 
-	// 5) NotifyFinished
-	if err := c.NotifyFinished(); err != nil {
-		return 
-	}
-	log.Infof("DEBAG: NotifyFinished done. Now querying winners")
+    log.Infof("DEBAG: Starting NotifyFinished")
 
-	// 6) Notify QueryWinners
-	if err := c.QueryWinners(); err != nil {
-		return 
-	}
+    // 5) Notify the server that this agency finished sending bets
+    if err := c.NotifyFinished(); err != nil {
+        return
+    }
+    log.Infof("DEBAG: NotifyFinished done. Now querying winners")
+
+    // 6) Query the winners (if the server already did the draw, we get the results)
+    if err := c.QueryWinners(); err != nil {
+        return
+    }
+
+    // 7) After everything, log "exit" so the tests can detect we ended properly
+    log.Infof("action: exit | result: success | client_id: %s", c.config.ID)
 }
 
-// readBetsFromFile lee el archivo CSV y devuelve un slice de líneas, cada línea con 5 campos: A,B,document,birthdate,number
+// readBetsFromFile loads each line from the CSV and returns them as a slice of strings
 func (c *Client) readBetsFromFile(filename string) ([]string, error) {
     file, err := os.Open(filename)
     if err != nil {
@@ -108,7 +112,7 @@ func (c *Client) readBetsFromFile(filename string) ([]string, error) {
     return bets, scanner.Err()
 }
 
-// chunkBets divide un slice de apuestas en sub-slices de tamaño batchSize
+// chunkBets splits a slice of bets into smaller chunks of batchSize
 func chunkBets(bets []string, batchSize int) [][]string {
     var chunks [][]string
     for i := 0; i < len(bets); i += batchSize {
@@ -121,7 +125,7 @@ func chunkBets(bets []string, batchSize int) [][]string {
     return chunks
 }
 
-// sendBatchAndAwaitResponse serializa el batch en un solo string con '\n' interno + '\n' final, lo envía y espera respuesta
+// sendBatchAndAwaitResponse sends a batch in one shot, then reads "success|N" or "fail|N"
 func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     // 1) Create connection
     conn, err := net.Dial("tcp", c.config.ServerAddress)
@@ -130,15 +134,25 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     }
     defer conn.Close()
 
-    // 2) Serialize: each bet in a line, joined by '\n', + at the end '\n' to delimit
-	// Exapmple: "A,B,00000000,2000-01-01,0\nA,B,00000001,2000-01-01,1\n"
-    batchData := fmt.Sprintf("agency_ID|%s\n", c.config.ID) + strings.Join(batch, "\n") + "\n"
-    _, err = conn.Write([]byte(batchData))
-    if err != nil {
+    // 2) Build data: first line "agency_ID|<ID>" + each bet on its own line + trailing "\n"
+    // Example:
+    //   agency_ID|2
+    //   Name,Surname,12345678,2000-01-01,100
+    //   Name2,Surname2,23456789,2000-01-01,101
+    //   ...
+    var sb strings.Builder
+    sb.WriteString(fmt.Sprintf("agency_ID|%s\n", c.config.ID))
+    for _, line := range batch {
+        sb.WriteString(line)
+        sb.WriteString("\n")
+    }
+
+    // 3) Send it
+    if _, err := conn.Write([]byte(sb.String())); err != nil {
         return fmt.Errorf("write fail: %w", err)
     }
 
-    // 3) Read response (p.ej. "success|N\n" o "fail|N\n")
+    // 4) Read response (e.g. "success|10\n" or "fail|0\n")
     response, err := bufio.NewReader(conn).ReadString('\n')
     if err != nil && err != io.EOF {
         return fmt.Errorf("read fail: %w", err)
@@ -163,10 +177,10 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     } else {
         log.Errorf("action: apuesta_enviada | result: fail | batch_size: %s", countStr)
     }
-	return nil
+    return nil
 }
 
-// NotifyFinished sends the final notification to the server.
+// NotifyFinished sends "notify_finished|<agency>" to tell the server we are done sending bets
 func (c *Client) NotifyFinished() error {
     conn, err := net.Dial("tcp", c.config.ServerAddress)
     if err != nil {
@@ -180,6 +194,7 @@ func (c *Client) NotifyFinished() error {
         log.Errorf("action: notify_send | result: fail | error: %v", err)
         return err
     }
+
     response, err := bufio.NewReader(conn).ReadString('\n')
     if err != nil {
         log.Errorf("action: notify_receive | result: fail | error: %v", err)
@@ -190,13 +205,13 @@ func (c *Client) NotifyFinished() error {
         log.Errorf("action: notify | result: fail | unexpected response: %s", response)
         return fmt.Errorf("unexpected response: %s", response)
     }
+
     log.Infof("action: notify | result: success | client_id: %s", c.config.ID)
     return nil
 }
 
-// QueryWinners sends a request to query the winners for this agency.
+// QueryWinners sends a request "query_winners|<agency>" and prints the results or fail
 func (c *Client) QueryWinners() error {
-	log.Infof("DEBUG: entrando a QueryWinners | client_id: %s", c.config.ID)
     conn, err := net.Dial("tcp", c.config.ServerAddress)
     if err != nil {
         log.Criticalf("action: query_connect | result: fail | error: %v", err)
@@ -219,13 +234,30 @@ func (c *Client) QueryWinners() error {
         return err
     }
     header = strings.TrimSpace(header)
+
+    // If server not done, it might say "fail|sorteo_no_listo"
+    if strings.HasPrefix(header, "fail|") {
+        log.Errorf("action: consulta_ganadores | result: fail | reason: %s", header)
+        return nil
+    }
+
+    // Otherwise, expect "ok|<N>"
     parts := strings.Split(header, "|")
     if len(parts) != 2 || parts[0] != "ok" {
         return fmt.Errorf("invalid header response: %s", header)
     }
     count, err := strconv.Atoi(parts[1])
     if err != nil {
-        return fmt.Errorf("invalid count in header response: %s", header)
+        return fmt.Errorf("invalid count: %s", parts[1])
+    }
+	
+    for i := 0; i < count; i++ {
+        // read each document line
+        _, docErr := reader.ReadString('\n')
+        if docErr != nil {
+            log.Errorf("failed reading winner %d: %v", i+1, docErr)
+            return docErr
+        }
     }
 
     log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", count)
