@@ -173,7 +173,7 @@ class Server:
                 client_sock.sendall(f"{doc}\n".encode('utf-8'))
 
             logging.info(
-            f"action: consulta_ganadores | result: success | cant_ganadores: {count} | documentos: {winners} | agency: client{agency}"
+            f"action: consulta_ganadores | result: success | cant_ganadores: {count}| agency: client{agency}"
             )
 
     def shutdown(self):
