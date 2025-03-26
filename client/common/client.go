@@ -245,15 +245,14 @@ func (c *Client) QueryWinners() error {
         header = strings.TrimSpace(header)
 
         // 4) Check if the server indicates that the draw is not ready yet
-        if strings.HasPrefix(header, "fail-sorteo_no_listo") {
+        if strings.HasPrefix(header, "in_progress-sorteo_no_listo") {
             log.Infof("action: consulta_ganadores | result: fail | reason: %s. Reintentando...", header)
             time.Sleep(wait)
             conn.Close()
             continue
         }
 
-        // 5) There may be other "fail-xxx" responses that are not "sorteo_no_listo".
-        // In that case, we stop and do not retry further.
+        // 5) In case of "fail-xxx" we stop and do not retry further.
         if strings.HasPrefix(header, "fail-") {
             log.Errorf("action: consulta_ganadores | result: fail | reason: %s", header)
             return nil

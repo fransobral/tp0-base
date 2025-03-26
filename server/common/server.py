@@ -153,11 +153,11 @@ class Server:
     def _handle_query_winners(self, client_sock, agency):
         """
         If the draw is done, respond with the winners for that agency.
-        Otherwise respond fail|sorteo_no_listo
+        Otherwise respond in_progress|sorteo_no_listo
         """
         with self._lock:
             if not self._draw_done:
-                client_sock.sendall("fail-sorteo_no_listo\n".encode('utf-8'))
+                client_sock.sendall("in_progress-sorteo_no_listo\n".encode('utf-8'))
                 return
 
             agency_id = int(agency)
