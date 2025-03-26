@@ -75,6 +75,18 @@ func (c *Client) StartClientBatch() {
         }
     }
     log.Infof("action: all_batches_sent | result: success | client_id: %v | total_bets: %v", c.config.ID, len(bets))
+	log.Infof("DEBAG: Starting NotifyFinished")
+
+	// 5) NotifyFinished
+	if err := c.NotifyFinished(); err != nil {
+		return 
+	}
+	log.Infof("DEBAG: NotifyFinished done. Now querying winners")
+
+	// 6) Notify QueryWinners
+	if err := c.QueryWinners(); err != nil {
+		return 
+	}
 }
 
 // readBetsFromFile lee el archivo CSV y devuelve un slice de líneas, cada línea con 5 campos: A,B,document,birthdate,number
@@ -120,7 +132,7 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
 
     // 2) Serialize: each bet in a line, joined by '\n', + at the end '\n' to delimit
 	// Exapmple: "A,B,00000000,2000-01-01,0\nA,B,00000001,2000-01-01,1\n"
-    batchData := strings.Join(batch, "\n") + "\n"
+    batchData := fmt.Sprintf("agency_ID|%s\n", c.config.ID) + strings.Join(batch, "\n") + "\n"
     _, err = conn.Write([]byte(batchData))
     if err != nil {
         return fmt.Errorf("write fail: %w", err)
@@ -151,5 +163,71 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     } else {
         log.Errorf("action: apuesta_enviada | result: fail | batch_size: %s", countStr)
     }
+	return nil
+}
+
+// NotifyFinished sends the final notification to the server.
+func (c *Client) NotifyFinished() error {
+    conn, err := net.Dial("tcp", c.config.ServerAddress)
+    if err != nil {
+        log.Criticalf("action: notify_connect | result: fail | error: %v", err)
+        return err
+    }
+    defer conn.Close()
+    message := fmt.Sprintf("notify_finished|%s\n", c.config.ID)
+    _, err = conn.Write([]byte(message))
+    if err != nil {
+        log.Errorf("action: notify_send | result: fail | error: %v", err)
+        return err
+    }
+    response, err := bufio.NewReader(conn).ReadString('\n')
+    if err != nil {
+        log.Errorf("action: notify_receive | result: fail | error: %v", err)
+        return err
+    }
+    response = strings.TrimSpace(response)
+    if response != "ack_notify" {
+        log.Errorf("action: notify | result: fail | unexpected response: %s", response)
+        return fmt.Errorf("unexpected response: %s", response)
+    }
+    log.Infof("action: notify | result: success | client_id: %s", c.config.ID)
+    return nil
+}
+
+// QueryWinners sends a request to query the winners for this agency.
+func (c *Client) QueryWinners() error {
+	log.Infof("DEBUG: entrando a QueryWinners | client_id: %s", c.config.ID)
+    conn, err := net.Dial("tcp", c.config.ServerAddress)
+    if err != nil {
+        log.Criticalf("action: query_connect | result: fail | error: %v", err)
+        return err
+    }
+    defer conn.Close()
+    message := fmt.Sprintf("query_winners|%s\n", c.config.ID)
+    _, err = conn.Write([]byte(message))
+    if err != nil {
+        log.Errorf("action: query_send | result: fail | error: %v", err)
+        return err
+    }
+
+    reader := bufio.NewReader(conn)
+
+	// Read header: ok|N
+    header, err := reader.ReadString('\n')
+    if err != nil {
+        log.Errorf("action: query_receive_header | result: fail | error: %v", err)
+        return err
+    }
+    header = strings.TrimSpace(header)
+    parts := strings.Split(header, "|")
+    if len(parts) != 2 || parts[0] != "ok" {
+        return fmt.Errorf("invalid header response: %s", header)
+    }
+    count, err := strconv.Atoi(parts[1])
+    if err != nil {
+        return fmt.Errorf("invalid count in header response: %s", header)
+    }
+
+    log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", count)
     return nil
 }
