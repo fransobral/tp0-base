@@ -76,13 +76,10 @@ func (c *Client) StartClientBatch() {
     log.Infof("action: all_batches_sent | result: success | client_id: %v | total_bets: %v",
         c.config.ID, len(bets))
 
-    log.Infof("DEBAG: Starting NotifyFinished")
-
     // 5) Notify the server that this agency finished sending bets
     if err := c.NotifyFinished(); err != nil {
         return
     }
-    log.Infof("DEBAG: NotifyFinished done. Now querying winners")
 
     // 6) Query the winners (if the server already did the draw, we get the results)
     if err := c.QueryWinners(); err != nil {
