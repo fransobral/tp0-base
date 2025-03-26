@@ -23,6 +23,7 @@ def main():
     lines.append("    entrypoint: python3 /main.py")
     lines.append("    environment:")
     lines.append("      - PYTHONUNBUFFERED=1")
+    lines.append(f"      - TOTAL_CLIENTES={num_clientes}")
     lines.append("    volumes:")
     lines.append("      - ./server/config.ini:/config.ini:ro")
     lines.append("    networks:")

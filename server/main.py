@@ -51,9 +51,11 @@ def main():
     # of the component
     logging.debug(f"action: config | result: success | port: {port} | "
                   f"listen_backlog: {listen_backlog} | logging_level: {logging_level}")
+    
+    expected_agencies = int(os.getenv("TOTAL_CLIENTES"))
 
     # Initialize server and start server loop
-    server = Server(port, listen_backlog)
+    server = Server(port, listen_backlog, expected_agencies)
     signal.signal(signal.SIGTERM, lambda s, f: handle_sigterm(s, f, server))
 
     server.run()

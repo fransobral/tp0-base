@@ -246,7 +246,7 @@ func (c *Client) QueryWinners() error {
 
         // 4) Check if the server indicates that the draw is not ready yet
         if strings.HasPrefix(header, "in_progress-sorteo_no_listo") {
-            log.Infof("action: consulta_ganadores | result: fail | reason: %s. Reintentando...", header)
+            log.Infof("action: consulta_ganadores | result: in_progress | reason: %s. Reintentando...", header)
             time.Sleep(wait)
             conn.Close()
             continue

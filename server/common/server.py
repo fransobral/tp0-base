@@ -4,7 +4,7 @@ from common.utils import Bet, store_bets, load_bets, has_won
 import threading
 
 class Server:
-    def __init__(self, port, listen_backlog):
+    def __init__(self, port, listen_backlog, expected_agencies):
         # Initialize server socket
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
@@ -14,7 +14,7 @@ class Server:
         # Internal state
         self._bets = []  # stores all received bets
         self._notified_agencies = set()  # track which agencies have completed sending
-        self._seen_agencies = set() #track wich agencies have been seen
+        self.expected_agencies = expected_agencies # expected agencies (docker-compose clients)
         self._winners_by_agency = {}  # store winning documents per agency
         self._draw_done = False  # flag to avoid re-running the draw
         self._lock = threading.Lock()  # ensure thread-safe updates
@@ -87,10 +87,6 @@ class Server:
             agency = lines[0].split('|')[1].strip()
             logging.info(f"action: parse_agency | result: success | agency: {agency}")
 
-            # Track that we have "seen" this agency (so we know how many total agencies are in play)
-            with self._lock:
-                self._seen_agencies.add(int(agency))
-
             # Parse each subsequent line as a single bet
             bets_to_store = []
             for line in lines[1:]:
@@ -140,8 +136,7 @@ class Server:
             self._notified_agencies.add(agency_id)
 
             # If all "seen" agencies have now notified, do the draw (only once)
-            if not self._draw_done and (self._notified_agencies == self._seen_agencies):
-                logging.info(f"{self._notified_agencies} == {self._seen_agencies}, running draw {self._draw_done}")
+            if not self._draw_done and (len(self._notified_agencies) == (self.expected_agencies)):
                 all_bets = load_bets()
                 for bet in all_bets:
                     if has_won(bet):
