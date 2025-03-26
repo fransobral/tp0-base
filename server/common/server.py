@@ -157,7 +157,7 @@ class Server:
         """
         with self._lock:
             if not self._draw_done:
-                client_sock.sendall("fail|sorteo_no_listo\n".encode('utf-8'))
+                client_sock.sendall("fail-sorteo_no_listo\n".encode('utf-8'))
                 return
 
             agency_id = int(agency)

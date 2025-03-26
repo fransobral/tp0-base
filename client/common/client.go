@@ -235,7 +235,7 @@ func (c *Client) QueryWinners() error {
     }
     header = strings.TrimSpace(header)
 
-    // If server not done, it might say "fail|sorteo_no_listo"
+    // If server not done, it might say "fail-sorteo_no_listo"
     if strings.HasPrefix(header, "fail|") {
         log.Errorf("action: consulta_ganadores | result: fail | reason: %s", header)
         return nil
