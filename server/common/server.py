@@ -14,6 +14,7 @@ class Server:
         # Internal state
         self._bets = []  # stores all received bets
         self._notified_agencies = set()  # track which agencies have completed sending
+        self._seen_agencies = set() #track wich agencies have been seen
         self._winners_by_agency = {}  # store winning documents per agency
         self._draw_done = False  # flag to avoid re-running the draw
         self._lock = threading.Lock()  # ensure thread-safe updates
