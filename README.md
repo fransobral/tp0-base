@@ -179,6 +179,7 @@ Se proveen [pruebas automáticas](https://github.com/7574-sistemas-distribuidos/
 
 La corrección personal tendrá en cuenta la calidad del código entregado y casos de error posibles, se manifiesten o no durante la ejecución del trabajo práctico. Se pide a los alumnos leer atentamente y **tener en cuenta** los criterios de corrección informados  [en el campus](https://campusgrado.fi.uba.ar/mod/page/view.php?id=73393).
 
+---
 
 # TP0: Docker + Comunicaciones + Concurrencia - Resolución
 
@@ -423,6 +424,53 @@ Utilizo un threading.Lock para proteger las estructuras compartidas (como la lis
 - **Errores de conexión en un entorno concurrente**
   - *Problema:* Se producían errores como "Broken pipe" cuando se intentaba enviar datos a conexiones ya cerradas.
   - *Solución:* Implementé un manejo robusto de excepciones que cierra adecuadamente la conexión y registra el error sin interrumpir el procesamiento de otros hilos.
+---
+## Conclusión General
+
+La evolución de este TP representó un camino progresivo desde una infraestructura básica hasta una solución distribuida robusta y concurrente, modelada en etapas:
+
+### Evolución de la Solución
+
+- **Ejercicio 1:** Comencé con la necesidad de escalar dinámicamente el entorno. Automatizar la generación de `docker-compose-dev.yaml` permitió trabajar con múltiples agencias sin modificar manualmente el archivo, y sentó las bases para simular un entorno distribuido.
+
+- **Ejercicio 2:** Profundicé la separación entre código e infraestructura. Garanticé que los contenedores pudieran adaptarse a cambios de configuración sin rebuild, favoreciendo la agilidad en el desarrollo.
+
+- **Ejercicio 3:** Validé la comunicación básica usando `netcat`, asegurando que la red interna de Docker funcionara como canal confiable entre servicios.
+
+- **Ejercicio 4:** Introduje el manejo de señales (`SIGTERM`) para lograr terminaciones ordenadas. Esta capacidad fue fundamental en etapas posteriores donde múltiples hilos y procesos se ejecutan en paralelo.
+
+- **Ejercicio 5:** Se dio el salto al dominio del negocio, reemplazando el echo server por el procesamiento de apuestas. Diseñe un protocolo simple de texto plano con delimitadores, y estructuré la lógica en torno a entidades como `Bet`.
+
+- **Ejercicio 6:** Incorporé el procesamiento por lotes (batch), permitiendo que los clientes envíen múltiples apuestas en una sola conexión. Esto mejoró el rendimiento general y permitió trabajar con archivos CSV reales.
+
+- **Ejercicio 7:** El sistema pasó a coordinar múltiples agencias. Implementé una notificación de finalización por cliente y un sorteo centralizado que espera a todas las agencias antes de responder. Esto introdujo lógica de sincronización y temporización de reintentos en el cliente.
+
+- **Ejercicio 8:** Finalmente, adapté el servidor para manejar concurrencia real. Creé un hilo por conexión y protegí los datos compartidos con `threading.Lock`. Resolvi errores como `Broken pipe` mediante manejo robusto de excepciones.
+
+### Protocolo de Comunicación
+
+La solución utiliza un protocolo personalizado sobre TCP. Cada mensaje sigue un formato textual claro y bien definido:
+
+- **Envío de apuestas:**  
+  - Inicio con `agency_ID|<id>`  
+  - Una línea por apuesta, campos separados por coma  
+  - Respuesta del servidor: `success|N` o `fail|0`
+
+- **Notificación de fin de envío:**  
+  - Cliente: `notify_finished|<id>`  
+  - Servidor: `ack_notify`
+
+- **Consulta de ganadores:**  
+  - Cliente: `query_winners|<id>`  
+  - Servidor:
+    - `in_progress-sorteo_no_listo` si el sorteo no se ejecutó aún
+    - `ok|N` + N líneas con documentos ganadores si el sorteo está listo
+
+Este diseño permitió una comunicación fluida entre clientes y servidor, con respuestas claras que habilitan reintentos seguros y controlados.
+
+---
+
+En resumen, la solución evolucionó desde una arquitectura monolítica con un único cliente, hasta una plataforma distribuida, concurrente, con configuración externa, procesamiento por lotes, y coordinación sincronizada entre múltiples nodos. Modelé una solución modular, extensible y tolerante a errores.
 
 ---
 
@@ -469,3 +517,5 @@ Para detener y eliminar los contenedores y recursos, ejecutá:
 ```bash
 make docker-compose-down
 ```
+
+
