@@ -212,6 +212,36 @@ El objetivo de este ejercicio es ampliar la solución del ejercicio 6 para coord
 - **Distribución Específica de Resultados:**  
   El servidor almacena los resultados del sorteo en un diccionario (`_winners_by_agency`) de forma que cada agencia solo reciba los DNI ganadores correspondientes a ella, en lugar de hacer un broadcast global.
 
+# Ejercicio 8 – Concurrencia en el Servidor
+
+## Objetivo
+
+- **Permitir el procesamiento concurrente:**  
+  Modificar el servidor para que pueda aceptar conexiones y procesar mensajes en paralelo, atendiendo a múltiples clientes simultáneamente.
+- **Consideración de la concurrencia en Python:**  
+  Aunque CPython está limitado por el Global Interpreter Lock (GIL), la naturaleza I/O-bound de la aplicación permite que el uso de multithreading sea efectivo para este caso.
+
+## Implementación
+
+- **Procesamiento paralelo mediante multithreading:**  
+  Modifiqué el bucle principal del servidor para que, al aceptar una conexión, se cree un nuevo hilo utilizando la librería `threading`. Cada hilo ejecuta la función `__handle_client_connection` de manera independiente.
+
+  ```python
+  t = threading.Thread(target=self.__handle_client_connection, args=(client_sock,))
+  t.daemon = True  # El hilo se termina junto con el proceso principal
+  t.start()
+  ```
+- **Sincronización del estado compartido:**
+Utilizo un threading.Lock para proteger las estructuras compartidas (como la lista de apuestas, el conjunto de agencias notificadas y el diccionario de ganadores). Esto garantiza que las actualizaciones sean atómicas y evita condiciones de carrera.
+
+## Complicaciones y Soluciones
+- **Concurrencia y estado compartido**  
+  - *Problema:* Al procesar múltiples conexiones en paralelo, existía el riesgo de condiciones de carrera al modificar estructuras compartidas.
+  - *Solución:* Implementé un Lock para asegurar que las actualizaciones del estado interno sean atómicas y seguras.
+- **Errores de conexión en un entorno concurrente**
+  - *Problema:* Se producían errores como "Broken pipe" cuando se intentaba enviar datos a conexiones ya cerradas.
+  - *Solución:* Implementé un manejo robusto de excepciones que cierra adecuadamente la conexión y registra el error sin interrumpir el procesamiento de otros hilos.
+
 ---
 
 ## Cómo ejecutar el proyecto
