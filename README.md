@@ -146,6 +146,72 @@ Este proyecto implementa un sistema distribuido básico utilizando contenedores 
   - **Problema 2:** Tuve complicaciones al agrupar las apuestas en batches, asegurándome de que cada paquete no excediera 8kB.
     - **Solución:** Implementé una función que divide el slice de apuestas en chunks del tamaño máximo configurado (definido en `batch.maxAmount`), lo que garantiza que cada mensaje enviado se mantenga por debajo del límite.
 
+# Ejercicio 7 – Notificación y Consulta de Ganadores del Sorteo
+
+## Objetivo
+
+El objetivo de este ejercicio es ampliar la solución del ejercicio 6 para coordinar el sorteo de apuestas entre múltiples agencias. Cada cliente (agencia) envía sus apuestas en lotes y, al finalizar, notifica al servidor que ha concluido su envío. Una vez que todas las agencias han notificado, el servidor ejecuta el sorteo evaluando cada apuesta con las funciones provistas (`load_bets` y `has_won`) y almacena, para cada agencia, únicamente los DNI ganadores. Posteriormente, cada cliente consulta el resultado del sorteo, recibiendo solo la información correspondiente a su agencia.
+
+## Implementación
+
+### En el Servidor
+
+- **Recepción y Procesamiento de Apuestas:**  
+  El servidor recibe lotes de apuestas. Cada lote se separa en líneas, y para cada línea se valida que contenga los 5 campos requeridos. Si el formato es correcto, se crea un objeto `Bet` y se almacena mediante la función `store_bets`.
+
+- **Notificación y Ejecución del Sorteo:**  
+  Cuando un cliente termina de enviar sus apuestas, notifica al servidor con el mensaje `notify_finished|<agency_id>`.  
+  - *Problema inicial:*  
+    Mi primer enfoque usaba una variable `seen_agencies` para rastrear las agencias conectadas, lo que hacía que el sorteo se ejecutara tan pronto como se conectaba alguna agencia, sin esperar a que todas terminaran.
+  - *Solución:*  
+    Introduje el parámetro `expected_agencies`, obtenido de la variable de entorno `TOTAL_CLIENTES` (configurado en Docker Compose). El servidor ahora espera hasta que el número de agencias notificadas sea igual al total esperado antes de ejecutar el sorteo.
+
+- **Consulta de Ganadores:**  
+  Los clientes consultan los resultados mediante `query_winners|<agency_id>`.  
+  - *Problema inicial:*  
+    Cuando un cliente consultaba antes de que el sorteo estuviera completo, el servidor respondía con un error (`fail|sorteo_no_listo`), impidiendo reintentos.
+  - *Solución:*  
+    Se modificó la respuesta para que el servidor envíe `in_progress-sorteo_no_listo`, lo que permite al cliente reintentar la consulta cada 1 segundo (hasta un máximo de 30 reintentos) hasta obtener el resultado final.
+
+### En el Cliente
+
+- **Envío de Apuestas:**  
+  Cada cliente lee su archivo CSV de apuestas (ubicado en `/app/.data/agency-<ID>.csv`), lo divide en lotes (chunks) con un tamaño máximo configurable y envía cada lote al servidor mediante conexiones TCP.
+
+- **Notificación y Consulta:**  
+  Una vez enviados todos los lotes, el cliente notifica al servidor con `notify_finished|<agency_id>` y, a continuación, consulta los ganadores. Si la respuesta es de "in_progress", el cliente reintenta la consulta, esperando que el sorteo se complete y se devuelvan los resultados pertinentes.
+
+## Comunicación
+
+- **Protocolo de Mensajes:**  
+  La comunicación se realiza vía TCP. Los mensajes tienen el siguiente formato:
+  - **Envío de apuestas:**  
+    Un bloque de texto que comienza con `agency_ID|<ID>` seguido por cada apuesta en una línea separada (los campos de cada apuesta están separados por comas).
+  - **Notificación de finalización:**  
+    `notify_finished|<agency_id>`
+  - **Consulta de ganadores:**  
+    `query_winners|<agency_id>`
+
+- **Respuestas del Servidor:**  
+  - Durante la consulta de ganadores, si el sorteo aún no ha sido ejecutado, el servidor responde con `in_progress-sorteo_no_listo`, lo que permite al cliente reintentar.
+  - Una vez que el sorteo se ha realizado, la respuesta es del formato `ok|<N>` seguido de cada DNI ganador en una línea separada.
+
+## Complicaciones y Soluciones
+
+- **Sincronización del Sorteo:**  
+  - *Problema:* Usar `seen_agencies` para determinar cuándo iniciar el sorteo resultaba en una ejecución prematura, ya que se tomaba en cuenta tan pronto como alguna agencia se conectaba.
+  - *Solución:* Se introdujo el parámetro `expected_agencies` (definido mediante la variable de entorno `TOTAL_CLIENTES` en Docker Compose), lo que permite que el servidor espere hasta recibir notificaciones de todas las agencias antes de realizar el sorteo.
+
+- **Manejo de la Consulta de Ganadores Antes del Sorteo:**  
+  - *Problema:* Si un cliente consultaba los ganadores antes de que el sorteo estuviera listo, el servidor respondía con `fail|sorteo_no_listo`, impidiendo reintentos y generando errores en los tests.
+  - *Solución:* Se modificó la respuesta para devolver `in_progress-sorteo_no_listo`, permitiendo al cliente reintentar la consulta de forma periódica (cada 1 segundo) hasta que se complete el sorteo.
+
+- **Reintentos en el Cliente:**  
+  Se implementó en el cliente (en la función `QueryWinners` en `client.go`) un mecanismo de reintentos con un intervalo de 1 segundo entre cada intento y un máximo de 30 reintentos. Esto garantiza que el cliente logre obtener la respuesta una vez que el sorteo esté completo.
+
+- **Distribución Específica de Resultados:**  
+  El servidor almacena los resultados del sorteo en un diccionario (`_winners_by_agency`) de forma que cada agencia solo reciba los DNI ganadores correspondientes a ella, en lugar de hacer un broadcast global.
+
 ---
 
 ## Cómo ejecutar el proyecto
