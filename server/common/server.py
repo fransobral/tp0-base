@@ -25,17 +25,17 @@ class Server:
         """
         Server loop:
         - Accept a connection
-        - Handle the incoming data:
-          * notify_finished|<agency_id>
-          * query_winners|<agency_id>
-          * Or a batch of bets
+        - Process each connection in a new thread
         """
         while self._running:
             try:
                 client_sock = self.__accept_new_connection()
             except OSError:
                 break
-            self.__handle_client_connection(client_sock)
+            # Spawn a new thread to handle the connection concurrently
+            t = threading.Thread(target=self.__handle_client_connection, args=(client_sock,))
+            t.daemon = True  # So that the thread dies with the main process
+            t.start()
         logging.info("action: server_shutdown | result: success | message: Server shutting down gracefully")
 
     def __accept_new_connection(self):
@@ -128,15 +128,14 @@ class Server:
     def _handle_notify_finished(self, agency):
         """
         Called when a client sends "notify_finished|<agency>".
-        We add that agency to notified set. If all seen agencies have notified,
-        we run the draw exactly once.
+        We add that agency to notified set. If the number of notified agencies equals
+        the number of expected agencies, we run the draw exactly once.
         """
         agency_id = int(agency)
         with self._lock:
             self._notified_agencies.add(agency_id)
-
-            # If all "seen" agencies have now notified, do the draw (only once)
-            if not self._draw_done and (len(self._notified_agencies) == (self.expected_agencies)):
+            # Run the draw only once when all expected agencies have notified
+            if not self._draw_done and (len(self._notified_agencies) == self.expected_agencies):
                 all_bets = load_bets()
                 for bet in all_bets:
                     if has_won(bet):
@@ -149,7 +148,7 @@ class Server:
     def _handle_query_winners(self, client_sock, agency):
         """
         If the draw is done, respond with the winners for that agency.
-        Otherwise respond in_progress|sorteo_no_listo
+        Otherwise respond in_progress-sorteo_no_listo.
         """
         with self._lock:
             if not self._draw_done:

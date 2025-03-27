@@ -224,22 +224,21 @@ func (c *Client) QueryWinners() error {
             return err
         }
 
-        // Important: close the connection after each attempt
-        defer conn.Close()
-
         // 2) Send the query message
         message := fmt.Sprintf("query_winners|%s\n", c.config.ID)
         _, err = conn.Write([]byte(message))
         if err != nil {
             log.Errorf("action: query_send | result: fail | error: %v", err)
+            conn.Close()
             return err
         }
 
-        // 3) Read the server's response
+        // 3) Read the server's response using a buffered reader
         reader := bufio.NewReader(conn)
         header, err := reader.ReadString('\n')
         if err != nil && err != io.EOF {
             log.Errorf("action: query_receive_header | result: fail | error: %v", err)
+            conn.Close()
             return err
         }
         header = strings.TrimSpace(header)
@@ -247,36 +246,47 @@ func (c *Client) QueryWinners() error {
         // 4) Check if the server indicates that the draw is not ready yet
         if strings.HasPrefix(header, "in_progress-sorteo_no_listo") {
             log.Infof("action: consulta_ganadores | result: in_progress | reason: %s. Reintentando...", header)
-            time.Sleep(wait)
             conn.Close()
+            time.Sleep(wait)
             continue
         }
 
-        // 5) In case of "fail-xxx" we stop and do not retry further.
+        // 5) If the server responded with a "fail", se termina el intento
         if strings.HasPrefix(header, "fail-") {
             log.Errorf("action: consulta_ganadores | result: fail | reason: %s", header)
+            conn.Close()
             return nil
         }
 
-        // 6) If we're here, we expect "ok|N"
-        parts := strings.Split(header, "|")
+        // 6) If we're here, we expect "ok|<N>"
+       	parts := strings.Split(header, "|")
         if len(parts) != 2 || parts[0] != "ok" {
+            conn.Close()
             return fmt.Errorf("invalid response from server: %s", header)
         }
-
-        // Number of winners
         count, err := strconv.Atoi(parts[1])
         if err != nil {
+            conn.Close()
             return fmt.Errorf("invalid count in response: %s", parts[1])
         }
 
-        // 7) Success! Log and exit the loop
+        // 7) Read the winner documents
+        for j := 0; j < count; j++ {
+            line, err := reader.ReadString('\n')
+            if err != nil {
+                log.Errorf("failed reading winner %d: %v", j+1, err)
+                conn.Close()
+                return err
+            }
+            line = strings.TrimSpace(line)
+            log.Infof("winner document: %s", line)
+        }
+
         log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", count)
+        conn.Close()
         return nil
     }
 
-    // If all retries are exhausted, report the failure
+    // If we reach this point, we exceeded the maximum number of retries
     return fmt.Errorf("exceeded maxRetries waiting for the draw (sorteo) to be ready")
 }
-
-
