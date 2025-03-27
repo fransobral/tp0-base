@@ -147,9 +147,15 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     }
 
     // 3) Send it
-    if _, err := conn.Write([]byte(sb.String())); err != nil {
-        return fmt.Errorf("write fail: %w", err)
-    }
+	data := []byte(sb.String())
+	n, err := conn.Write(data)
+	if err != nil {
+		return fmt.Errorf("write fail: %w", err)
+	}
+	if n != len(data) {
+		return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", n, len(data))
+	}
+
 
     // 4) Read response (e.g. "success|10\n" or "fail|0\n")
     response, err := bufio.NewReader(conn).ReadString('\n')
@@ -187,12 +193,18 @@ func (c *Client) NotifyFinished() error {
         return err
     }
     defer conn.Close()
+
     message := fmt.Sprintf("notify_finished|%s\n", c.config.ID)
-    _, err = conn.Write([]byte(message))
-    if err != nil {
-        log.Errorf("action: notify_send | result: fail | error: %v", err)
-        return err
-    }
+	data := []byte(message)
+	n, err := conn.Write(data)
+	if err != nil {
+		log.Errorf("action: notify_send | result: fail | error: %v", err)
+		return err
+	}
+	if n != len(data) {
+		log.Errorf("action: notify_send | result: fail | wrote %d, expected %d", n, len(data))
+		return fmt.Errorf("incomplete write in notify")
+	}
 
     response, err := bufio.NewReader(conn).ReadString('\n')
     if err != nil {
@@ -229,11 +241,19 @@ func (c *Client) QueryWinners() error {
 
         // 2) Send the query message
         message := fmt.Sprintf("query_winners|%s\n", c.config.ID)
-        _, err = conn.Write([]byte(message))
-        if err != nil {
-            log.Errorf("action: query_send | result: fail | error: %v", err)
-            return err
-        }
+		data := []byte(message)
+		n, err := conn.Write(data)
+		
+		if err != nil {
+			log.Errorf("action: query_send | result: fail | error: %v", err)
+			return err
+		}
+
+		if n != len(data) {
+			log.Errorf("action: query_send | result: fail | wrote %d, expected %d", n, len(data))
+			conn.Close()
+			return fmt.Errorf("incomplete write in query")
+		}
 
         // 3) Read the server's response
         reader := bufio.NewReader(conn)
