@@ -48,6 +48,57 @@ class Server:
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         return c
 
+    def __read_exactly(self, client_sock, n: int) -> bytes:
+        """
+        Reads exactly n bytes from the socket.
+        Raises an exception if the connection is closed before n bytes are read.
+        """
+        data = bytearray()
+        while len(data) < n:
+            chunk = client_sock.recv(n - len(data))
+            if not chunk:
+                raise Exception("Connection closed before reading expected bytes")
+            data.extend(chunk)
+        return bytes(data)
+    
+    def read_message_with_length_prefix(self, client_sock, delimiter: bytes = b";") -> str:
+        """
+        Reads the message sent over the socket using a length prefix.
+        First, it reads the header (until the delimiter) to obtain the expected message length,
+        then it reads exactly that many bytes from the socket.
+        
+        Returns:
+            The complete message as a UTF-8 string (with the final newline removed).
+        """
+        header_bytes = bytearray()
+        # Read header until delimiter is found
+        while True:
+            byte = client_sock.recv(1)
+            if not byte:
+                break
+            if byte == delimiter:
+                break
+            header_bytes.extend(byte)
+        
+        if not header_bytes:
+            return ""
+        
+        try:
+            expected_length = int(header_bytes.decode("utf-8"))
+        except Exception as e:
+            logging.error(f"Invalid header received: {header_bytes}")
+            return ""
+        
+        # Read exactly the expected number of bytes
+        try:
+            message_bytes = self.__read_exactly(client_sock, expected_length)
+        except Exception as e:
+            logging.error(f"Error reading message body: {str(e)}")
+            return ""
+        
+        # Decode and remove trailing newline (if any)
+        return message_bytes.decode("utf-8").rstrip("\n")
+
     def __handle_client_connection(self, client_sock):
         """
         Handles a new connection from a client.
@@ -57,7 +108,7 @@ class Server:
           3) A batch of bets (header: "agency_ID|<id>", followed by lines "A,B,doc,2000-01-01,num")
         """
         try:
-            data = client_sock.recv(8192).decode('utf-8').rstrip('\n')
+            data = self.read_message_with_length_prefix(client_sock)
             if not data:
                 logging.error("action: receive_batch | result: fail | reason: empty_data")
                 client_sock.sendall("fail|0\n".encode('utf-8'))
