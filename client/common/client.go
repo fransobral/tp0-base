@@ -23,7 +23,7 @@ type ClientConfig struct {
     ServerAddress string
     LoopAmount    int
     LoopPeriod    time.Duration
-    MaxBatch      int           // batch.maxAmount from config.yaml
+    MaxBatch      int // batch.maxAmount from config.yaml
 }
 
 // Client handles reading bets from a CSV file and sending them in batches
@@ -86,8 +86,8 @@ func (c *Client) StartClientBatch() {
         return
     }
 
-	time.Sleep(500 * time.Millisecond)
-	
+    time.Sleep(500 * time.Millisecond)
+
     // 7) After everything, log "exit" so the tests can detect we ended properly
     log.Infof("action: exit | result: success | client_id: %s", c.config.ID)
 }
@@ -134,28 +134,28 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     defer conn.Close()
 
     // 2) Build data: first line "agency_ID|<ID>" + each bet on its own line + trailing "\n"
-    // Example:
-    //   agency_ID|2
-    //   Name,Surname,12345678,2000-01-01,100
-    //   Name2,Surname2,23456789,2000-01-01,101
-    //   ...
     var sb strings.Builder
     sb.WriteString(fmt.Sprintf("agency_ID|%s\n", c.config.ID))
     for _, line := range batch {
         sb.WriteString(line)
         sb.WriteString("\n")
     }
+    messageBody := sb.String()
+    data := []byte(messageBody)
 
-    // 3) Send it
-	data := []byte(sb.String())
-	n, err := conn.Write(data)
-	if err != nil {
-		return fmt.Errorf("write fail: %w", err)
-	}
-	if n != len(data) {
-		return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", n, len(data))
-	}
+    // Prepend header with the length of messageBody and a semicolon delimiter
+    header := fmt.Sprintf("%d;", len(data))
+    fullMessage := []byte(header)
+    fullMessage = append(fullMessage, data...)
 
+    // 3) Send fullMessage
+    n, err := conn.Write(fullMessage)
+    if err != nil {
+        return fmt.Errorf("write fail: %w", err)
+    }
+    if n != len(fullMessage) {
+        return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", n, len(fullMessage))
+    }
 
     // 4) Read response (e.g. "success|10\n" or "fail|0\n")
     response, err := bufio.NewReader(conn).ReadString('\n')
@@ -194,17 +194,22 @@ func (c *Client) NotifyFinished() error {
     }
     defer conn.Close()
     message := fmt.Sprintf("notify_finished|%s\n", c.config.ID)
+    data := []byte(message)
 
-	data := []byte(message)
-	n, err := conn.Write(data)
-	if err != nil {
-		log.Errorf("action: notify_send | result: fail | error: %v", err)
-		return err
-	}
-	if n != len(data) {
-		log.Errorf("action: notify_send | result: fail | wrote %d, expected %d", n, len(data))
-		return fmt.Errorf("incomplete write in notify")
-	}
+    // Prepend header with the message length and delimiter
+    header := fmt.Sprintf("%d;", len(data))
+    fullMessage := []byte(header)
+    fullMessage = append(fullMessage, data...)
+
+    n, err := conn.Write(fullMessage)
+    if err != nil {
+        log.Errorf("action: notify_send | result: fail | error: %v", err)
+        return err
+    }
+    if n != len(fullMessage) {
+        log.Errorf("action: notify_send | result: fail | wrote %d, expected %d", n, len(fullMessage))
+        return fmt.Errorf("incomplete write in notify")
+    }
 
     response, err := bufio.NewReader(conn).ReadString('\n')
     if err != nil {
@@ -238,52 +243,54 @@ func (c *Client) QueryWinners() error {
 
         // 2) Send the query message
         message := fmt.Sprintf("query_winners|%s\n", c.config.ID)
+        data := []byte(message)
+        // Prepend header with the message length and delimiter
+        header := fmt.Sprintf("%d;", len(data))
+        fullMessage := []byte(header)
+        fullMessage = append(fullMessage, data...)
 
-		data := []byte(message)
-		n, err := conn.Write(data)
-
-		if err != nil {
-			log.Errorf("action: query_send | result: fail | error: %v", err)
-			conn.Close()
-			return err
-		}
-
-		if n != len(data) {
-			log.Errorf("action: query_send | result: fail | wrote %d, expected %d", n, len(data))
-			conn.Close()
-			return fmt.Errorf("incomplete write in query")
-		}
+        n, err := conn.Write(fullMessage)
+        if err != nil {
+            log.Errorf("action: query_send | result: fail | error: %v", err)
+            conn.Close()
+            return err
+        }
+        if n != len(fullMessage) {
+            log.Errorf("action: query_send | result: fail | wrote %d, expected %d", n, len(fullMessage))
+            conn.Close()
+            return fmt.Errorf("incomplete write in query")
+        }
 
         // 3) Read the server's response using a buffered reader
         reader := bufio.NewReader(conn)
-        header, err := reader.ReadString('\n')
+        headerResponse, err := reader.ReadString('\n')
         if err != nil && err != io.EOF {
             log.Errorf("action: query_receive_header | result: fail | error: %v", err)
             conn.Close()
             return err
         }
-        header = strings.TrimSpace(header)
+        headerResponse = strings.TrimSpace(headerResponse)
 
         // 4) Check if the server indicates that the draw is not ready yet
-        if strings.HasPrefix(header, "in_progress-sorteo_no_listo") {
-            log.Infof("action: consulta_ganadores | result: in_progress | reason: %s. Reintentando...", header)
+        if strings.HasPrefix(headerResponse, "in_progress-sorteo_no_listo") {
+            log.Infof("action: consulta_ganadores | result: in_progress | reason: %s. Reintentando...", headerResponse)
             conn.Close()
             time.Sleep(wait)
             continue
         }
 
-        // 5) If the server responded with a "fail", se termina el intento
-        if strings.HasPrefix(header, "fail-") {
-            log.Errorf("action: consulta_ganadores | result: fail | reason: %s", header)
+        // 5) If the server responded with a "fail", end the attempt
+        if strings.HasPrefix(headerResponse, "fail-") {
+            log.Errorf("action: consulta_ganadores | result: fail | reason: %s", headerResponse)
             conn.Close()
             return nil
         }
 
         // 6) If we're here, we expect "ok|<N>"
-       	parts := strings.Split(header, "|")
+        parts := strings.Split(headerResponse, "|")
         if len(parts) != 2 || parts[0] != "ok" {
             conn.Close()
-            return fmt.Errorf("invalid response from server: %s", header)
+            return fmt.Errorf("invalid response from server: %s", headerResponse)
         }
         count, err := strconv.Atoi(parts[1])
         if err != nil {
