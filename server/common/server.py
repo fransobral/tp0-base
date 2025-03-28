@@ -24,21 +24,29 @@ class Server:
     def run(self):
         """
         Server loop:
-        - Accept a connection
-        - Process each connection in a new thread
+        - Accept a connection.
+        - Process each connection in a new thread.
+        At shutdown, waits for all threads to finish.
         """
+        threads = []
         while self._running:
             try:
                 client_sock = self.__accept_new_connection()
             except OSError:
                 break
-            # Spawn a new thread to handle the connection concurrently
+            # Create a new thread to handle the connection
             t = threading.Thread(target=self.__handle_client_connection, args=(client_sock,))
-            #enviar mail a pablo justificando xq utilizo hilos
-            #corregir, poner join dsps del while !!+
-            t.daemon = True  # So that the thread dies with the main process
             t.start()
+            threads.append(t)
+        
+        # Wait for all threads to complete before shutdown
+        for t in threads:
+            t.join()
+
+        self._server_socket.close()
+            
         logging.info("action: server_shutdown | result: success | message: Server shutting down gracefully")
+
 
     def __accept_new_connection(self):
         """
@@ -111,7 +119,6 @@ class Server:
           3) A batch of bets (header: "agency_ID|<id>", followed by lines "A,B,doc,2000-01-01,num")
         """
         try:
-            #corregir!!+
             data = self.read_message_with_length_prefix(client_sock)
 
             if not data:
@@ -233,8 +240,6 @@ class Server:
         """
         self._running = False
         try:
-            #cerrrar el client socket dsps del while !!+
-            self._server_socket.close()
             logging.info("action: close_server_socket | result: success | message: Server socket closed")
         except Exception as e:
             logging.error(f"action: close_server_socket | result: fail | error: {e}")
