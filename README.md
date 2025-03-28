@@ -181,7 +181,7 @@ La corrección personal tendrá en cuenta la calidad del código entregado y cas
 
 ---
 
-# TP0: Docker + Comunicaciones + Concurrencia
+# TP0: Docker + Comunicaciones + Concurrencia - Resolución
 
 Este proyecto implementa un sistema distribuido básico utilizando contenedores Docker. La idea es demostrar la comunicación entre procesos y la concurrencia mediante un servidor "echo" (desarrollado en Python) y múltiples clientes (desarrollados en Go).
 
