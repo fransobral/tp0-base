@@ -160,18 +160,18 @@ El objetivo de este ejercicio es ampliar la solución del ejercicio 6 para coord
   El servidor recibe lotes de apuestas. Cada lote se separa en líneas, y para cada línea se valida que contenga los 5 campos requeridos. Si el formato es correcto, se crea un objeto `Bet` y se almacena mediante la función `store_bets`.
 
 - **Notificación y Ejecución del Sorteo:**  
-  Cuando un cliente termina de enviar sus apuestas, notifica al servidor con el mensaje `notify_finished|<agency_id>`.  
+  Cuando un cliente termina de enviar sus apuestas, notifica al servidor con el mensaje `<longitud>;notify_finished|<agency_id>`.  
   - *Problema inicial:*  
     Mi primer enfoque usaba una variable `seen_agencies` para rastrear las agencias conectadas, lo que hacía que el sorteo se ejecutara tan pronto como se conectaba alguna agencia, sin esperar a que todas terminaran.
   - *Solución:*  
     Introduje el parámetro `expected_agencies`, obtenido de la variable de entorno `TOTAL_CLIENTES` (configurado en Docker Compose). El servidor ahora espera hasta que el número de agencias notificadas sea igual al total esperado antes de ejecutar el sorteo.
 
 - **Consulta de Ganadores:**  
-  Los clientes consultan los resultados mediante `query_winners|<agency_id>`.  
+  Los clientes consultan los resultados mediante `<longitud>;query_winners|<agency_id>`.  
   - *Problema inicial:*  
-    Cuando un cliente consultaba antes de que el sorteo estuviera completo, el servidor respondía con un error (`fail|sorteo_no_listo`), impidiendo reintentos.
+    Cuando un cliente consultaba antes de que el sorteo estuviera completo, el servidor respondía con un error (`<longitud>;fail|sorteo_no_listo`), impidiendo reintentos.
   - *Solución:*  
-    Se modificó la respuesta para que el servidor envíe `in_progress-sorteo_no_listo`, lo que permite al cliente reintentar la consulta cada 1 segundo (hasta un máximo de 30 reintentos) hasta obtener el resultado final.
+    Se modificó la respuesta para que el servidor envíe `<longitud>;in_progress-sorteo_no_listo`, lo que permite al cliente reintentar la consulta cada 1 segundo (hasta un máximo de 30 reintentos) hasta obtener el resultado final.
 
 ### En el Cliente
 
@@ -179,18 +179,17 @@ El objetivo de este ejercicio es ampliar la solución del ejercicio 6 para coord
   Cada cliente lee su archivo CSV de apuestas (ubicado en `/app/.data/agency-<ID>.csv`), lo divide en lotes (chunks) con un tamaño máximo configurable y envía cada lote al servidor mediante conexiones TCP.
 
 - **Notificación y Consulta:**  
-  Una vez enviados todos los lotes, el cliente notifica al servidor con `notify_finished|<agency_id>` y, a continuación, consulta los ganadores. Si la respuesta es de "in_progress", el cliente reintenta la consulta, esperando que el sorteo se complete y se devuelvan los resultados pertinentes.
+  Una vez enviados todos los lotes, el cliente notifica al servidor con `<longitud>;notify_finished|<agency_id>` y, a continuación, consulta los ganadores. Si la respuesta es de "in_progress", el cliente reintenta la consulta, esperando que el sorteo se complete y se devuelvan los resultados pertinentes.
 
 ## Comunicación
-
 - **Protocolo de Mensajes:**  
   La comunicación se realiza vía TCP. Los mensajes tienen el siguiente formato:
   - **Envío de apuestas:**  
-    Un bloque de texto que comienza con `agency_ID|<ID>` seguido por cada apuesta en una línea separada (los campos de cada apuesta están separados por comas).
+    Un bloque de texto que comienza con `<longitud>;agency_ID|<ID>` seguido por cada apuesta en una línea separada (los campos de cada apuesta están separados por comas).
   - **Notificación de finalización:**  
-    `notify_finished|<agency_id>`
+    `<longitud>;notify_finished|<agency_id>`
   - **Consulta de ganadores:**  
-    `query_winners|<agency_id>`
+    `<longitud>;query_winners|<agency_id>`
 
 - **Respuestas del Servidor:**  
   - Durante la consulta de ganadores, si el sorteo aún no ha sido ejecutado, el servidor responde con `in_progress-sorteo_no_listo`, lo que permite al cliente reintentar.
@@ -225,12 +224,6 @@ El objetivo de este ejercicio es ampliar la solución del ejercicio 6 para coord
 
 - **Procesamiento paralelo mediante multithreading:**  
   Modifiqué el bucle principal del servidor para que, al aceptar una conexión, se cree un nuevo hilo utilizando la librería `threading`. Cada hilo ejecuta la función `__handle_client_connection` de manera independiente.
-
-  ```python
-  t = threading.Thread(target=self.__handle_client_connection, args=(client_sock,))
-  t.daemon = True  # El hilo se termina junto con el proceso principal
-  t.start()
-  ```
 - **Sincronización del estado compartido:**
 Utilizo un threading.Lock para proteger las estructuras compartidas (como la lista de apuestas, el conjunto de agencias notificadas y el diccionario de ganadores). Esto garantiza que las actualizaciones sean atómicas y evita condiciones de carrera.
 
@@ -238,10 +231,6 @@ Utilizo un threading.Lock para proteger las estructuras compartidas (como la lis
 - **Concurrencia y estado compartido**  
   - *Problema:* Al procesar múltiples conexiones en paralelo, existía el riesgo de condiciones de carrera al modificar estructuras compartidas.
   - *Solución:* Implementé un Lock para asegurar que las actualizaciones del estado interno sean atómicas y seguras.
-- **Errores de conexión en un entorno concurrente**
-  - *Problema:* Se producían errores como "Broken pipe" cuando se intentaba enviar datos a conexiones ya cerradas.
-  - *Solución:* Implementé un manejo robusto de excepciones que cierra adecuadamente la conexión y registra el error sin interrumpir el procesamiento de otros hilos.
-
 ---
 
 ## Cómo ejecutar el proyecto
