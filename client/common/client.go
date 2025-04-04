@@ -180,9 +180,10 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
 		return fmt.Errorf("write fail: %w", err)
 	}
 
-    // 4) Read response (e.g. "success|10\n" or "fail|0\n")
-    response, err := bufio.NewReader(conn).ReadString('\n')
-    if err != nil && err != io.EOF {
+    // 4) Read response using persistent read with retry (see readResponseWithRetry)
+    reader := bufio.NewReader(conn)
+    response, err := readResponseWithRetry(reader)
+    if err != nil {
         return fmt.Errorf("read fail: %w", err)
     }
 
@@ -208,8 +209,24 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     return nil
 }
 
+// readResponseWithRetry attempts to read a line from the buffered reader with retries.
+// This makes the reading process persistent in case of transient errors.
+func readResponseWithRetry(reader *bufio.Reader) (string, error) {
+    var response string
+    var err error
+    for attempt := 1; attempt <= MaxRetries; attempt++ {
+        response, err = reader.ReadString('\n')
+        if err == nil || err == io.EOF {
+            return response, nil
+        }
+        log.Errorf("action: read_response_retry | attempt: %d | error: %v", attempt, err)
+        time.Sleep(WaitTime)
+    }
+    return response, err
+}
+
 // sendBatchWithRetry attempts to send a batch with retries in case of failure.
-// This function wraps sendBatchAndAwaitResponse, retrying up to maxRetries times with a delay of retryDelay between attempts.
+// This function wraps sendBatchAndAwaitResponse, retrying up to MaxRetries times with a delay of WaitTime between attempts.
 func (c *Client) sendBatchWithRetry(batch []string) error {
     var err error
     for attempt := 1; attempt <= MaxRetries; attempt++ {
@@ -225,14 +242,26 @@ func (c *Client) sendBatchWithRetry(batch []string) error {
     return fmt.Errorf("failed to send batch after %d attempts: %w", MaxRetries, err)
 }
 
-// NotifyFinished sends "notify_finished|<agency>" to tell the server we are done sending bets
+// NotifyFinished sends "notify_finished|<agency>" to tell the server we are done sending bets,
+// with persistent send/receive logic.
 func (c *Client) NotifyFinished() error {
-    conn, err := net.Dial("tcp", c.config.ServerAddress)
+    var err error
+    var conn net.Conn
+    // Retry connection
+    for attempt := 1; attempt <= MaxRetries; attempt++ {
+        conn, err = net.Dial("tcp", c.config.ServerAddress)
+        if err == nil {
+            break
+        }
+        log.Errorf("action: notify_connect_retry | attempt: %d | error: %v", attempt, err)
+        time.Sleep(WaitTime)
+    }
     if err != nil {
         log.Criticalf("action: notify_connect | result: fail | error: %v", err)
         return err
     }
     defer conn.Close()
+
     message := fmt.Sprintf("notify_finished|%s\n", c.config.ID)
     data := []byte(message)
 
@@ -242,11 +271,12 @@ func (c *Client) NotifyFinished() error {
     fullMessage = append(fullMessage, data...)
 
     if err := writeFull(conn, fullMessage); err != nil {
-		log.Errorf("action: notify_send | result: fail | error: %v", err)
-		return err
-	}
+        log.Errorf("action: notify_send | result: fail | error: %v", err)
+        return err
+    }
 
-    response, err := bufio.NewReader(conn).ReadString('\n')
+    // Use persistent read for the response
+    response, err := readResponseWithRetry(bufio.NewReader(conn))
     if err != nil {
         log.Errorf("action: notify_receive | result: fail | error: %v", err)
         return err
@@ -261,26 +291,33 @@ func (c *Client) NotifyFinished() error {
     return nil
 }
 
-// QueryWinners retries several times until the draw (sorteo) is ready
+// QueryWinners retries several times until the draw (sorteo) is ready, using persistent
+// send and receive logic for the query message.
 func (c *Client) QueryWinners() error {
-    // Maximum number of retries before giving up
     maxRetries := 30
-    // Waiting time between each retry
     wait := 1 * time.Second
 
     for i := 0; i < maxRetries; i++ {
-        // 1) Open a connection
-        conn, err := net.Dial("tcp", c.config.ServerAddress)
+        // Retry connection
+        var conn net.Conn
+        var err error
+        for attempt := 1; attempt <= MaxRetries; attempt++ {
+            conn, err = net.Dial("tcp", c.config.ServerAddress)
+            if err == nil {
+                break
+            }
+            log.Errorf("action: query_connect_retry | attempt: %d | error: %v", attempt, err)
+            time.Sleep(WaitTime)
+        }
         if err != nil {
             log.Criticalf("action: query_connect | result: fail | error: %v", err)
             return err
         }
 
-        // 2) Send the query message
+        // Send query message with persistent write
         message := fmt.Sprintf("query_winners|%s\n", c.config.ID)
         data := []byte(message)
-        // Prepend header with the message length and delimiter
-        header := fmt.Sprintf("%d;", len(data))
+        header := fmt.Sprintf("%d;", len(data)) // Prepend header with the message length and delimiter
         fullMessage := []byte(header)
         fullMessage = append(fullMessage, data...)
 
@@ -290,9 +327,9 @@ func (c *Client) QueryWinners() error {
 			return err
 		}
 
-        // 3) Read the server's response using a buffered reader
+        // 3) Read the server's response using persistence logic
         reader := bufio.NewReader(conn)
-        headerResponse, err := reader.ReadString('\n')
+        headerResponse, err := readResponseWithRetry(reader)
         if err != nil && err != io.EOF {
             log.Errorf("action: query_receive_header | result: fail | error: %v", err)
             conn.Close()
@@ -347,3 +384,4 @@ func (c *Client) QueryWinners() error {
     // If we reach this point, we exceeded the maximum number of retries
     return fmt.Errorf("exceeded maxRetries waiting for the draw (sorteo) to be ready")
 }
+
