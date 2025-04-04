@@ -15,6 +15,11 @@ import (
     "github.com/op/go-logging"
 )
 
+const (
+    MaxRetries = 3
+    WaitTime   = 1 * time.Second
+)
+
 var log = logging.MustGetLogger("log")
 
 // ClientConfig includes batch.maxAmount from config.yaml, in addition to the legacy fields
@@ -105,7 +110,7 @@ func (c *Client) sendBetsByChunks(filename string) (int, error) {
 
         // If the batch is full, send it to the server
         if len(batch) == batchSize {
-            if err := c.sendBatchAndAwaitResponse(batch); err != nil {
+            if err := c.sendBatchWithRetry(batch); err != nil {
                 return total, err
             }
             total += len(batch)
@@ -116,7 +121,7 @@ func (c *Client) sendBetsByChunks(filename string) (int, error) {
 
     // Send the last partial batch (if any)
     if len(batch) > 0 {
-        if err := c.sendBatchAndAwaitResponse(batch); err != nil {
+        if err := c.sendBatchWithRetry(batch); err != nil {
             return total, err
         }
         total += len(batch)
@@ -130,6 +135,20 @@ func (c *Client) sendBetsByChunks(filename string) (int, error) {
     log.Infof("action: all_batches_sent | result: success | client_id: %v | total_bets: %v",
         c.config.ID, total)
     return total, nil
+}
+
+// writeFull ensures that the entire data slice is written to the connection.
+// It loops until all bytes have been sent or an error occurs.
+func writeFull(conn net.Conn, data []byte) error {
+    totalWritten := 0
+    for totalWritten < len(data) {
+        n, err := conn.Write(data[totalWritten:])
+        if err != nil {
+            return err
+        }
+        totalWritten += n
+    }
+    return nil
 }
 
 // sendBatchAndAwaitResponse sends a batch in one shot, then reads "success|N" or "fail|N"
@@ -156,14 +175,10 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     fullMessage := []byte(header)
     fullMessage = append(fullMessage, data...)
 
-    // 3) Send fullMessage
-    n, err := conn.Write(fullMessage)
-    if err != nil {
-        return fmt.Errorf("write fail: %w", err)
-    }
-    if n != len(fullMessage) {
-        return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", n, len(fullMessage))
-    }
+	// 3) Send fullMessage, ensuring all bytes are written.
+	if err := writeFull(conn, fullMessage); err != nil {
+		return fmt.Errorf("write fail: %w", err)
+	}
 
     // 4) Read response (e.g. "success|10\n" or "fail|0\n")
     response, err := bufio.NewReader(conn).ReadString('\n')
@@ -193,6 +208,23 @@ func (c *Client) sendBatchAndAwaitResponse(batch []string) error {
     return nil
 }
 
+// sendBatchWithRetry attempts to send a batch with retries in case of failure.
+// This function wraps sendBatchAndAwaitResponse, retrying up to maxRetries times with a delay of retryDelay between attempts.
+func (c *Client) sendBatchWithRetry(batch []string) error {
+    var err error
+    for attempt := 1; attempt <= MaxRetries; attempt++ {
+        err = c.sendBatchAndAwaitResponse(batch)
+        if err == nil {
+            // Successfully sent the batch, return nil error.
+            return nil
+        }
+        log.Errorf("action: send_batch_retry | attempt: %d | result: fail | error: %v", attempt, err)
+        time.Sleep(WaitTime)
+    }
+    // After MaxRetries attempts, return the last error encountered.
+    return fmt.Errorf("failed to send batch after %d attempts: %w", MaxRetries, err)
+}
+
 // NotifyFinished sends "notify_finished|<agency>" to tell the server we are done sending bets
 func (c *Client) NotifyFinished() error {
     conn, err := net.Dial("tcp", c.config.ServerAddress)
@@ -209,15 +241,10 @@ func (c *Client) NotifyFinished() error {
     fullMessage := []byte(header)
     fullMessage = append(fullMessage, data...)
 
-    n, err := conn.Write(fullMessage)
-    if err != nil {
-        log.Errorf("action: notify_send | result: fail | error: %v", err)
-        return err
-    }
-    if n != len(fullMessage) {
-        log.Errorf("action: notify_send | result: fail | wrote %d, expected %d", n, len(fullMessage))
-        return fmt.Errorf("incomplete write in notify")
-    }
+    if err := writeFull(conn, fullMessage); err != nil {
+		log.Errorf("action: notify_send | result: fail | error: %v", err)
+		return err
+	}
 
     response, err := bufio.NewReader(conn).ReadString('\n')
     if err != nil {
@@ -257,17 +284,11 @@ func (c *Client) QueryWinners() error {
         fullMessage := []byte(header)
         fullMessage = append(fullMessage, data...)
 
-        n, err := conn.Write(fullMessage)
-        if err != nil {
-            log.Errorf("action: query_send | result: fail | error: %v", err)
-            conn.Close()
-            return err
-        }
-        if n != len(fullMessage) {
-            log.Errorf("action: query_send | result: fail | wrote %d, expected %d", n, len(fullMessage))
-            conn.Close()
-            return fmt.Errorf("incomplete write in query")
-        }
+        if err := writeFull(conn, fullMessage); err != nil {
+			log.Errorf("action: query_send | result: fail | error: %v", err)
+			conn.Close()
+			return err
+		}
 
         // 3) Read the server's response using a buffered reader
         reader := bufio.NewReader(conn)
