@@ -1,7 +1,9 @@
 import socket
 import logging
-from common.utils import Bet, store_bets, load_bets, has_won
 import threading
+
+from common.utils import Bet, store_bets, load_bets, has_won
+from common.protocol import read_message_with_length_prefix, parse_message
 
 class Server:
     def __init__(self, port, listen_backlog, expected_agencies):
@@ -41,8 +43,6 @@ class Server:
         # Wait for all threads to complete before shutdown
         for t in threads:
             t.join()
-
-        self._server_socket.close()
             
         logging.info("action: server_shutdown | result: success | message: Server shutting down gracefully")
 
@@ -118,66 +118,58 @@ class Server:
           3) A batch of bets (header: "agency_ID|<id>", followed by lines "A,B,doc,2000-01-01,num")
         """
         try:
-            data = self.read_message_with_length_prefix(client_sock)
+            data = read_message_with_length_prefix(client_sock)
+            message_info = parse_message(data)
 
-            if not data:
-                logging.error("action: receive_batch | result: fail | reason: empty_data")
-                client_sock.sendall("fail|0\n".encode('utf-8'))
+            # If something is wrong or empty
+            if message_info.get('type') == 'error':
+                reason = message_info.get('reason', 'unknown_error')
+                logging.error(f"action: receive_message | result: fail | reason: {reason}")
+                client_sock.sendall(b"fail|0\n")
                 return
 
-            # 1) Handle "notify_finished|<agency>"
-            if data.startswith("notify_finished|"):
-                agency = data.split('|')[1].strip()
+            msg_type = message_info['type']
+
+            if msg_type == 'notify_finished':
+                agency = message_info['agency']
                 self._handle_notify_finished(agency)
-                client_sock.sendall("ack_notify\n".encode('utf-8'))
+                client_sock.sendall(b"ack_notify\n")
                 return
 
-            # 2) Handle "query_winners|<agency>"
-            if data.startswith("query_winners|"):
-                agency = data.split('|')[1].strip()
+            if msg_type == 'query_winners':
+                agency = message_info['agency']
                 self._handle_query_winners(client_sock, agency)
                 return
 
-            # 3) Otherwise, assume it's a batch starting with "agency_ID|<id>"
-            lines = data.split('\n')
-            if not lines[0].startswith("agency_ID|"):
-                logging.error("action: parse_agency | result: fail | reason: missing_agency_id")
-                client_sock.sendall("fail|0\n".encode('utf-8'))
-                return
+            if msg_type == 'batch':
+                agency = message_info['agency']
+                logging.info(f"action: parse_agency | result: success | agency: {agency}")
 
-            # Extract agency ID from the first line
-            agency = lines[0].split('|')[1].strip()
-            logging.info(f"action: parse_agency | result: success | agency: {agency}")
+                bets_to_store = []
+                for line in message_info['lines']:
+                    fields = line.strip().split(',')
+                    if len(fields) != 5:
+                        logging.info("action: apuesta_recibida | result: fail | reason: bad_format")
+                        client_sock.sendall(b"fail|0\n")
+                        return
 
-            # Parse each subsequent line as a single bet
-            bets_to_store = []
-            for line in lines[1:]:
-                fields = line.strip().split(',')
-                if len(fields) != 5:
-                    logging.info("action: apuesta_recibida | result: fail | cantidad: 0 | reason: bad_format")
-                    client_sock.sendall("fail|0\n".encode('utf-8'))
-                    return
+                    first_name, last_name, document, birthdate, number_str = fields
+                    try:
+                        bet = Bet(agency, first_name, last_name, document, birthdate, number_str)
+                    except Exception as e:
+                        logging.info(f"action: apuesta_recibida | result: fail | error: {str(e)}")
+                        client_sock.sendall(b"fail|0\n")
+                        return
 
-                # Parse individual bet fields
-                first_name, last_name, document, birthdate, number_str = fields
-                try:
-                    # Attempt to construct a Bet object
-                    bet = Bet(agency, first_name, last_name, document, birthdate, number_str)
-                except Exception as e:
-                    logging.info(f"action: apuesta_recibida | result: fail | error: {str(e)}")
-                    client_sock.sendall("fail|0\n".encode('utf-8'))
-                    return
+                    bets_to_store.append(bet)
 
-                bets_to_store.append(bet)
+                # Store bets in a thread-safe manner
+                with self._lock:
+                    store_bets(bets_to_store)
 
-            # Store the bets thread-safely
-            with self._lock:
-                store_bets(bets_to_store)
-
-            # Report successful receipt of bets
-            total = len(bets_to_store)
-            logging.info(f"action: apuesta_recibida | result: success | cantidad: {total}")
-            client_sock.sendall(f"success|{total}\n".encode('utf-8'))
+                total = len(bets_to_store)
+                logging.info(f"action: apuesta_recibida | result: success | cantidad: {total}")
+                client_sock.sendall(f"success|{total}\n".encode('utf-8'))
 
         except Exception as e:
             logging.error(f"action: process_batch | result: fail | error: {str(e)}")
@@ -229,15 +221,16 @@ class Server:
                 client_sock.sendall(f"{doc}\n".encode('utf-8'))
 
             logging.info(
-            f"action: consulta_ganadores | result: success | cant_ganadores: {count}| agency: client{agency}"
+            f"action: consulta_ganadores | result: success | cant_ganadores: {count} | agency: client{agency}"
             )
 
     def shutdown(self):
         """
-        Graceful shutdown: stop the server loop and close the socket.
+        Graceful shutdown: stop the server loop, wait for all active threads to finish processing, and close the server socket.
         """
         self._running = False
         try:
+            self._server_socket.close()
             logging.info("action: close_server_socket | result: success | message: Server socket closed")
         except Exception as e:
             logging.error(f"action: close_server_socket | result: fail | error: {e}")

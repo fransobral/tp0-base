@@ -60,7 +60,6 @@ def main():
     server.run()
 
     # When server.run() ends, it means the server has finished all the conections and threads.
-    logging.info("action: shutdown_signal | result: success | message: SIGTERM received")
     sys.exit(0)
 
 def initialize_log(logging_level):
