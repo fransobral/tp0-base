@@ -12,7 +12,6 @@ class Server:
         self._running = True
 
         # Internal state
-        self._bets = []  # stores all received bets
         self._notified_agencies = set()  # track which agencies have completed sending
         self.expected_agencies = expected_agencies # expected agencies (docker-compose clients)
         self._winners_by_agency = {}  # store winning documents per agency
@@ -174,7 +173,6 @@ class Server:
             # Store the bets thread-safely
             with self._lock:
                 store_bets(bets_to_store)
-                self._bets.extend(bets_to_store)
 
             # Report successful receipt of bets
             total = len(bets_to_store)

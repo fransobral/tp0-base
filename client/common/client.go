@@ -38,7 +38,7 @@ func NewClient(config ClientConfig) *Client {
     }
 }
 
-// StartClientBatch reads the file "agency-{ID}.csv", chunks the bets, and sends them to the server.
+// StartClientBatch reads the file "agency-{ID}.csv", processes bets in chunks, and sends them to the server.
 func (c *Client) StartClientBatch() {
     // 1) Handle SIGTERM
     sigChan := make(chan os.Signal, 1)
@@ -51,77 +51,85 @@ func (c *Client) StartClientBatch() {
         // no SIGTERM => proceed
     }
 
-    // 2) Read CSV: "agency-{ID}.csv"
+    // 2) 2) Read CSV: " agency- {ID} . csv" and send the CSV data in batches
     filename := fmt.Sprintf("/app/.data/agency-%s.csv", c.config.ID)
-    bets, err := c.readBetsFromFile(filename)
+    total, err := c.sendBetsByChunks(filename)
     if err != nil {
-        log.Errorf("action: read_file | result: fail | error: %v", err)
+        log.Errorf("action: send_chunks | result: fail | error: %v", err)
         return
     }
-    if len(bets) == 0 {
+    if total == 0 {
+        // If the file is empty or has no valid bets
         log.Infof("action: no_bets_found | result: success | client_id: %v", c.config.ID)
         return
     }
 
-    // 3) Group in batches of size c.config.MaxBatch
-    batches := chunkBets(bets, c.config.MaxBatch)
-
-    // 4) For each batch, send and await response
-    for _, batch := range batches {
-        if err := c.sendBatchAndAwaitResponse(batch); err != nil {
-            log.Errorf("action: send_batch | result: fail | error: %v", err)
-            return
-        }
-    }
-    log.Infof("action: all_batches_sent | result: success | client_id: %v | total_bets: %v",
-        c.config.ID, len(bets))
-
-    // 5) Notify the server that this agency finished sending bets
+    // 3) Notify the server that this agency finished sending bets
     if err := c.NotifyFinished(); err != nil {
         return
     }
 
-    // 6) Query the winners (if the server already did the draw, we get the results)
+    // 4) Query the winners (if the server already did the draw, we get the results)
     if err := c.QueryWinners(); err != nil {
         return
     }
 
     time.Sleep(500 * time.Millisecond)
 
-    // 7) After everything, log "exit" so the tests can detect we ended properly
+    // 5) After everything, log "exit" so the tests can detect we ended properly
     log.Infof("action: exit | result: success | client_id: %s", c.config.ID)
 }
 
-// readBetsFromFile loads each line from the CSV and returns them as a slice of strings
-func (c *Client) readBetsFromFile(filename string) ([]string, error) {
+// sendBetsByChunks opens the CSV file and reads it line by line.
+// Whenever the batch size c.config.MaxBatch is reached, it sends the batch
+// to the server using sendBatchAndAwaitResponse(...). Then it clears the in-memory
+// batch before continuing to read further lines.
+func (c *Client) sendBetsByChunks(filename string) (int, error) {
     file, err := os.Open(filename)
     if err != nil {
-        return nil, err
+        return 0, err
     }
     defer file.Close()
 
-    var bets []string
     scanner := bufio.NewScanner(file)
+    var batch []string
+    batchSize := c.config.MaxBatch
+    total := 0 // total lines sent
+
     for scanner.Scan() {
         line := strings.TrimSpace(scanner.Text())
-        if line != "" {
-            bets = append(bets, line)
+        if line == "" {
+            continue
         }
-    }
-    return bets, scanner.Err()
-}
+        batch = append(batch, line)
 
-// chunkBets splits a slice of bets into smaller chunks of batchSize
-func chunkBets(bets []string, batchSize int) [][]string {
-    var chunks [][]string
-    for i := 0; i < len(bets); i += batchSize {
-        end := i + batchSize
-        if end > len(bets) {
-            end = len(bets)
+        // If the batch is full, send it to the server
+        if len(batch) == batchSize {
+            if err := c.sendBatchAndAwaitResponse(batch); err != nil {
+                return total, err
+            }
+            total += len(batch)
+            // Reuse the slice without reallocating
+            batch = batch[:0]
         }
-        chunks = append(chunks, bets[i:end])
     }
-    return chunks
+
+    // Send the last partial batch (if any)
+    if len(batch) > 0 {
+        if err := c.sendBatchAndAwaitResponse(batch); err != nil {
+            return total, err
+        }
+        total += len(batch)
+    }
+
+    // Check for any error that happened during scanning
+    if err := scanner.Err(); err != nil {
+        return total, err
+    }
+
+    log.Infof("action: all_batches_sent | result: success | client_id: %v | total_bets: %v",
+        c.config.ID, total)
+    return total, nil
 }
 
 // sendBatchAndAwaitResponse sends a batch in one shot, then reads "success|N" or "fail|N"
