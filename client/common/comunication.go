@@ -57,7 +57,7 @@ func dialWithRetry(address string) (net.Conn, error) {
 		if err == nil {
 			return conn, nil
 		}
-		comunicationLog.Errorf("action: dial_retry | attempt: %d | error: %v", attempt, err)
+        comunicationLog.Errorf("action: dial_retry | result: in_progress | attempt: %d | error: %v", attempt, err)
 		time.Sleep(WaitTime)
 	}
 	return nil, fmt.Errorf("failed to dial after %d attempts: %w", MaxRetries, err)
