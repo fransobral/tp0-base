@@ -35,9 +35,8 @@ def initialize_config():
     return config_params
 
 def handle_sigterm(signum, frame, server):
-    logging.info("action: shutdown_signal | result: success | message: SIGTERM received")
+    logging.info("action: shutdown_signal | result: in_progress | message: SIGTERM received")
     server.shutdown()
-    sys.exit(0)
 
 def main():
     config_params = initialize_config()
@@ -59,6 +58,9 @@ def main():
     signal.signal(signal.SIGTERM, lambda s, f: handle_sigterm(s, f, server))
 
     server.run()
+
+    # When server.run() ends, it means the server has finished all the conections and threads.
+    sys.exit(0)
 
 def initialize_log(logging_level):
     """
